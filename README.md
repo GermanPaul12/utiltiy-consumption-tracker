@@ -49,34 +49,34 @@ The database engine automatically handles deployment environments:
 ### Local Installation
 
 1. **Clone the Repository:**
-   """bash
+   ```bash
    git clone https://github.com/your-username/utility-consumption-tracker.git
    cd utility-consumption-tracker
-   """
+   ```
 
 2. **Create a Virtual Environment:**
-   """bash
+   ```bash
    python -m venv .venv
    source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
-   """
+   ```
 
 3. **Install Dependencies:**
-   """bash
+   ```bash
    pip install -r requirements.txt
-   """
+   ```
 
 4. **Configure Local Environment Variables:**
    Create a file named `.env` in the root directory:
-   """env
+   ```env
    # Leave blank to use local SQLite, or add your Supabase connection string:
    DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@db.reqassdcxcsvrxalmmsh.supabase.co:6543/postgres?sslmode=require
-   """
+   ```
    *(Note: The database password should have special characters URL-encoded, e.g., `@` replaced by `%40`).*
 
 5. **Run the Application:**
-   """bash
+   ```bash
    streamlit run app.py
-   """
+   ```
 
 ---
 
@@ -90,9 +90,9 @@ Since cloud servers use ephemeral containers that wipe local files on reboot, yo
 2. Deploy the repository on **Streamlit Community Cloud**.
 3. In your Streamlit App Dashboard, navigate to **Settings** -> **Secrets** (or **Environment Variables** on other platforms).
 4. Paste your production database connection URL:
-   """toml
+   ```toml
    DATABASE_URL = "postgresql://postgres:YOUR_PASSWORD@db.reqassdcxcsvrxalmmsh.supabase.co:6543/postgres?sslmode=require"
-   """
+   ```
 5. Save the configuration. The remote server will securely initialize the tables and sync with your cloud database.
 
 ---

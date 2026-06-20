@@ -1,1 +1,6 @@
+# Exclude local database files
+utility_tracker.db
+
+# Exclude local configuration / environment secrets
 .env
+.streamlit/secrets.toml
