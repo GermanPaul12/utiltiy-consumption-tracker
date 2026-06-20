@@ -1,0 +1,14 @@
+[project]
+name = "utility-consumption-tracker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "dotenv>=0.9.9",
+    "pandas>=3.0.3",
+    "pg8000>=1.31.5",
+    "plotly>=6.8.0",
+    "sqlalchemy>=2.0.51",
+    "streamlit>=1.58.0",
+]
