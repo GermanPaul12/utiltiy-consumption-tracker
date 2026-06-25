@@ -4,3 +4,4 @@ utility_tracker.db
 # Exclude local configuration / environment secrets
 .env
 .streamlit/secrets.toml
+__pycache__
