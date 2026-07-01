@@ -3,6 +3,103 @@ import datetime
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
+
+def calculate_monthly_allocated_consumption(processed_logs, rates):
+    if processed_logs.empty:
+        return {}
+        
+    meters_meta = {
+        "Electricity (kWh)": {"rate_key": "electricity_kwh", "unit": "kWh"},
+        "Hot Water (MWh)": {"rate_key": "hot_water_mwh", "unit": "MWh"},
+        "Cold Water (m³)": {"rate_key": "cold_water_m3", "unit": "m³"}
+    }
+    
+    today = datetime.date.today()
+    start_period = today - datetime.timedelta(days=365)
+    # Generate all dates from 1 year ago to today
+    date_range = pd.date_range(start=start_period, end=today).date
+    
+    monthly_data = {}
+    
+    for meter_name, meta in meters_meta.items():
+        meter_df = processed_logs[processed_logs['meter'] == meter_name].copy()
+        if len(meter_df) < 2:
+            continue
+            
+        meter_df = meter_df.sort_values(by='date')
+        
+        # Create a continuous daily timeline
+        df_days = pd.DataFrame({"date": date_range})
+        df_days['rate'] = 0.0
+        
+        last_rate = 0.0
+        last_date = None
+        
+        # Fill in the actual logged intervals
+        for j in range(1, len(meter_df)):
+            start = meter_df.iloc[j-1]['date']
+            end = meter_df.iloc[j]['date']
+            days = (end - start).days
+            if days > 0:
+                rate = (meter_df.iloc[j]['reading'] - meter_df.iloc[j-1]['reading']) / days
+                df_days.loc[(df_days['date'] > start) & (df_days['date'] <= end), 'rate'] = rate
+                last_rate = rate
+                last_date = end
+                
+        # Carry forward the last known rate up to today (handles the current month extrapolation)
+        if last_date is not None:
+            df_days.loc[df_days['date'] > last_date, 'rate'] = last_rate
+            
+        # Calculate daily costs (including pro-rated base charges for electricity)
+        unit_rate = rates[meta["rate_key"]]
+        if meter_name == "Electricity (kWh)":
+            daily_base = rates["electricity_base"] / 30.44
+            df_days['cost'] = df_days.apply(
+                lambda r: (r['rate'] * unit_rate) + daily_base if r['rate'] > 0 else 0.0, 
+                axis=1
+            )
+        else:
+            df_days['cost'] = df_days['rate'] * unit_rate
+            
+        # Filter out days before tracking started (where rate is 0)
+        df_days = df_days[df_days['rate'] > 0]
+        
+        if df_days.empty:
+            continue
+            
+        # Aggregate daily data into calendar months
+        df_days['month'] = pd.to_datetime(df_days['date']).dt.to_period('M').astype(str)
+        df_monthly = df_days.groupby('month').agg(
+            total_consumption=('rate', 'sum'),
+            total_cost=('cost', 'sum')
+        ).reset_index()
+        
+        # Calculate Rolling 3-Month Averages & Month-over-Month Percentage Change Rates
+        df_monthly['rolling_3mo'] = df_monthly['total_consumption'].rolling(window=3, min_periods=1).mean()
+        df_monthly['mom_pct_change'] = df_monthly['total_consumption'].pct_change().fillna(0.0) * 100
+        
+        # Sort and keep a maximum of 12 months back
+        df_monthly = df_monthly.sort_values(by='month').tail(12)
+        monthly_data[meter_name] = df_monthly
+        
+    return monthly_data
+
+
+def get_season_name(month_str):
+    try:
+        month = int(month_str.split("-")[1])
+        if month in [12, 1, 2]:
+            return "❄️ Winter (Dec-Feb)"
+        elif month in [3, 4, 5]:
+            return "🌱 Spring (Mar-May)"
+        elif month in [6, 7, 8]:
+            return "☀️ Summer (Jun-Aug)"
+        else:
+            return "🍂 Autumn (Sep-Nov)"
+    except Exception:
+        return "Unknown"
+
 
 def render_page(processed_logs, stats, rates, plotly_template):
     st.title("Utility Consumption Dashboard")
@@ -400,6 +497,127 @@ def render_page(processed_logs, stats, rates, plotly_template):
     if not has_sufficient_data:
         st.info("Visual charts require at least two logged points to show historical progression.")
     else:
+        # 8A. Calendar Monthly Consumption Chart (Combined Bar & Line Trend)
+        st.write("### 📅 Prorated Monthly Consumption & Trend Line")
+        st.caption("This chart displays your consumption distributed day-by-day and aggregated by calendar month, overlaid with a **3-Month Rolling Average Trend Line** to smooth out minor log date variations.")
+        
+        monthly_allocated_data = calculate_monthly_allocated_consumption(processed_logs, rates)
+        if monthly_allocated_data:
+            selected_meter_chart = st.selectbox(
+                "Select Utility to View Calendar Month Consumption:",
+                ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"]
+            )
+            filtered_monthly = monthly_allocated_data.get(selected_meter_chart)
+            if filtered_monthly is not None and not filtered_monthly.empty:
+                # Extract corresponding unit from selection name
+                unit_label = selected_meter_chart.split("(")[-1].replace(")", "")
+                
+                # We use Plotly Graph Objects to gracefully combine Bar and Line traces
+                fig_allocated = go.Figure()
+                
+                # 1. Bar Chart Trace (Physical Units consumed)
+                fig_allocated.add_trace(go.Bar(
+                    x=filtered_monthly['month'],
+                    y=filtered_monthly['total_consumption'],
+                    name='Monthly Consumption',
+                    marker_color=color_map[selected_meter_chart],
+                    customdata=filtered_monthly[['total_cost']],
+                    hovertemplate="<b>Month:</b> %{x}<br>" +
+                                  f"<b>Consumption:</b> %{{y:.2f}} {unit_label}<br>" +
+                                  "<b>Estimated Cost:</b> €%{customdata[0]:,.2f}<extra></extra>"
+                ))
+                
+                # 2. Line Chart Trace (Rolling 3-Month average trend line)
+                fig_allocated.add_trace(go.Scatter(
+                    x=filtered_monthly['month'],
+                    y=filtered_monthly['rolling_3mo'],
+                    name='3-Month Rolling Avg',
+                    mode='lines+markers',
+                    # Use a contrasting vibrant color to separate the line from the bars
+                    line=dict(color="#f43f5e" if selected_meter_chart == "Electricity (kWh)" else "#10b981", width=3.5),
+                    hovertemplate=f"<b>3-Month Trend:</b> %{{y:.2f}} {unit_label}<extra></extra>"
+                ))
+                
+                fig_allocated.update_layout(
+                    title=f"Calendar Monthly Consumption & 3-Month Trend Line - {selected_meter_chart}",
+                    xaxis_title="Month",
+                    yaxis_title=f"Consumption ({unit_label})",
+                    template=plotly_template,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_allocated, use_container_width=True)
+                
+                # 8B. Advanced Sparse Data Analytics
+                st.write("### 🍂 Sparse Data Analytics & Trends")
+                st.caption("These specialized visual metrics are designed to help make sense of historical habits across seasonal cycles.")
+                
+                col_adv1, col_col2 = st.columns(2)
+                
+                with col_adv1:
+                    # Month-Over-Month Change Rate (%)
+                    # We render a dynamic bar chart that highlights Savings in Green and Increases in Red
+                    filtered_monthly['direction'] = filtered_monthly['mom_pct_change'].apply(
+                        lambda val: "Saving (Decrease)" if val <= 0 else "Usage Increase"
+                    )
+                    
+                    fig_mom = px.bar(
+                        filtered_monthly,
+                        x='month',
+                        y='mom_pct_change',
+                        color='direction',
+                        color_discrete_map={"Saving (Decrease)": "#22c55e", "Usage Increase": "#ef4444"},
+                        title=f"Month-over-Month Consumption Change Rate (%) - {selected_meter_chart}",
+                        labels={"mom_pct_change": "Change (%)", "month": "Month", "direction": "Trend"},
+                        template=plotly_template
+                    )
+                    fig_mom.add_hline(y=0.0, line_color="#94a3b8", line_dash="dash")
+                    st.plotly_chart(fig_mom, use_container_width=True)
+                    
+                with col_col2:
+                    # Seasonal Consumption Profile Grouping
+                    filtered_monthly['season'] = filtered_monthly['month'].apply(get_season_name)
+                    df_seasonal = filtered_monthly.groupby('season').agg(
+                        avg_consumption=('total_consumption', 'mean'),
+                        avg_cost=('total_cost', 'mean')
+                    ).reset_index()
+                    
+                    # Sort seasons chronologically to keep the chart cohesive
+                    season_order = ["❄️ Winter (Dec-Feb)", "🌱 Spring (Mar-May)", "☀️ Summer (Jun-Aug)", "🍂 Autumn (Sep-Nov)"]
+                    df_seasonal['season'] = pd.Categorical(df_seasonal['season'], categories=season_order, ordered=True)
+                    df_seasonal = df_seasonal.sort_values('season')
+                    
+                    fig_season = px.bar(
+                        df_seasonal,
+                        x='season',
+                        y='avg_consumption',
+                        title=f"Average Consumption by Season - {selected_meter_chart}",
+                        labels={"avg_consumption": f"Average Usage ({unit_label})", "season": "Season"},
+                        template=plotly_template,
+                        color='season',
+                        color_discrete_map={
+                            "❄️ Winter (Dec-Feb)": "#38bdf8",  # Sky blue
+                            "🌱 Spring (Mar-May)": "#34d399",  # Emerald green
+                            "☀️ Summer (Jun-Aug)": "#f59e0b",  # Amber
+                            "🍂 Autumn (Sep-Nov)": "#fb7185"   # Rose
+                        }
+                    )
+                    # Custom hover detailing showing average seasonal costs in €
+                    fig_season.update_traces(
+                        hovertemplate="<b>Season:</b> %{x}<br>" +
+                                      f"<b>Avg Consumption:</b> %{{y:.2f}} {unit_label}<br>" +
+                                      "<b>Avg Monthly Cost:</b> €%{customdata[0]:,.2f}<extra></extra>",
+                        customdata=df_seasonal[['avg_cost']]
+                    )
+                    st.plotly_chart(fig_season, use_container_width=True)
+                
+            else:
+                st.caption(f"Insufficient historical data to segment monthly allocated chart for {selected_meter_chart}.")
+        else:
+            st.caption("Log more entries to calculate dynamic monthly tracking estimates.")
+        
+        st.markdown("---")
+
         # Cumulative Cost Line (Line Color Mapped)
         fig_cum = px.line(
             processed_logs[processed_logs['cumulative_cost'] > 0],
@@ -416,7 +634,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
         
         active_intervals = processed_logs[processed_logs['days_elapsed'] > 0]
         if not active_intervals.empty:
-            # 8B. Daily Cost Stacked Bar (Bar Color Mapped)
+            # 8C. Daily Cost Stacked Bar (Bar Color Mapped)
             fig_daily_cost = px.bar(
                 active_intervals,
                 x="date",
