@@ -9,7 +9,14 @@ def render_page(current_user_id, logs):
         st.info("No recorded database entries found.")
     else:
         st.subheader("Saved Log Entries")
-        st.dataframe(logs.drop(columns=["user_id"], errors="ignore"), use_container_width=True)
+        
+        # Sort values with newest dates (and highest IDs) at the top for display
+        display_logs = logs.sort_values(by=["date", "id"], ascending=[False, False])
+        
+        st.dataframe(
+            display_logs.drop(columns=["user_id"], errors="ignore"), 
+            width="stretch"
+        )
         
         st.markdown("---")
         st.subheader("Delete Log Entry")

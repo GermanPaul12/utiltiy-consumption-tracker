@@ -97,9 +97,6 @@ if st.session_state.user is None:
 current_user_id = st.session_state.user["id"]
 current_username = st.session_state.user["email"]
 
-# Print the UUID to your terminal console for debugging (Console Only)
-print(f"\n--- DEBUG: Current Logged-In User UUID: {current_user_id} ---\n", flush=True)
-
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.title("Utility Tracker")
 st.sidebar.write(f"Logged in as: **{current_username}**")
@@ -130,11 +127,12 @@ page = st.sidebar.radio(
 # Load State for Current Logged In User
 rates = db.load_rates(current_user_id)
 logs = db.load_logs(current_user_id)
+smart_logs = db.load_smart_device_logs(current_user_id)
 processed_logs, stats = metrics.calculate_metrics(logs, rates)
 
 # --- ROUTER DISPATCHER ---
 if page == "Dashboard Overview":
-    ui_dashboard.render_page(processed_logs, stats, rates, plotly_template)
+    ui_dashboard.render_page(processed_logs, stats, rates, plotly_template, smart_logs)
 
 elif page == "Log Consumption":
     ui_log_consumption.render_page(current_user_id, logs)

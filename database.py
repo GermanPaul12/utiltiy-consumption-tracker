@@ -60,9 +60,37 @@ def initialize_database():
     if is_sqlite:
         execute_db("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, date TEXT, meter TEXT, reading REAL)")
         execute_db("CREATE TABLE IF NOT EXISTS rates (user_id TEXT PRIMARY KEY, electricity_kwh REAL, electricity_base REAL, hot_water_mwh REAL, cold_water_m3 REAL, electricity_prepayment REAL, hot_water_prepayment REAL, cold_water_prepayment REAL, household_size INTEGER DEFAULT 1, apartment_size REAL DEFAULT 50.0)")
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS smart_device_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                user_id TEXT, 
+                date TEXT, 
+                device_name TEXT, 
+                ip TEXT, 
+                current_power_w REAL, 
+                today_energy_kwh REAL, 
+                month_energy_kwh REAL, 
+                today_runtime_min INTEGER, 
+                month_runtime_min INTEGER
+            )
+        """)
     else:
         execute_db("CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, date DATE, meter VARCHAR(100), reading DOUBLE PRECISION)")
         execute_db("CREATE TABLE IF NOT EXISTS rates (user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE, electricity_kwh DOUBLE PRECISION, electricity_base DOUBLE PRECISION, hot_water_mwh DOUBLE PRECISION, cold_water_m3 DOUBLE PRECISION, electricity_prepayment DOUBLE PRECISION, hot_water_prepayment DOUBLE PRECISION, cold_water_prepayment DOUBLE PRECISION, household_size INTEGER DEFAULT 1, apartment_size DOUBLE PRECISION DEFAULT 50.0)")
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS smart_device_logs (
+                id SERIAL PRIMARY KEY, 
+                user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, 
+                date DATE, 
+                device_name VARCHAR(100), 
+                ip VARCHAR(45), 
+                current_power_w DOUBLE PRECISION, 
+                today_energy_kwh DOUBLE PRECISION, 
+                month_energy_kwh DOUBLE PRECISION, 
+                today_runtime_min INTEGER, 
+                month_runtime_min INTEGER
+            )
+        """)
 
     try:
         df_rates_check = run_query("SELECT * FROM rates LIMIT 1")
@@ -124,6 +152,12 @@ def save_rates(user_id, rates_dict):
 
 def load_logs(user_id):
     df = run_query("SELECT * FROM logs WHERE user_id = :uid ORDER BY date ASC", {"uid": user_id})
+    if not df.empty:
+        df['date'] = pd.to_datetime(df['date']).dt.date
+    return df
+
+def load_smart_device_logs(user_id):
+    df = run_query("SELECT * FROM smart_device_logs WHERE user_id = :uid ORDER BY date ASC", {"uid": user_id})
     if not df.empty:
         df['date'] = pd.to_datetime(df['date']).dt.date
     return df

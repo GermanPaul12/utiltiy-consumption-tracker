@@ -101,7 +101,7 @@ def get_season_name(month_str):
         return "Unknown"
 
 
-def render_page(processed_logs, stats, rates, plotly_template):
+def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
     st.title("Utility Consumption Dashboard")
     
     if processed_logs.empty:
@@ -120,7 +120,8 @@ def render_page(processed_logs, stats, rates, plotly_template):
         "Actual Incurred Cost": "#ef4444",           # Red
         "Prepayments Paid to Date": "#22c55e",       # Green
         "Variable (Usage)": "#eab308",               # Yellow
-        "Fixed (Base Standing Charge)": "#ef4444"     # Red
+        "Fixed (Base Standing Charge)": "#ef4444",    # Red
+        "Unbekannt (Rest)": "#64748b"                # Slate grey for remainder
     }
 
     # Basic Calculations
@@ -242,7 +243,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
             color_discrete_map=color_map  # Enforced
         )
         fig_running_ledger.add_hline(y=0.0, line_dash="dash", line_color="#94a3b8", annotation_text="Break-even (€0)")
-        st.plotly_chart(fig_running_ledger, use_container_width=True)
+        st.plotly_chart(fig_running_ledger, width="stretch")
 
     col_deep_left, col_deep_right = st.columns(2)
     
@@ -258,7 +259,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
             template=plotly_template,
             color_discrete_map=color_map  # Enforced
         )
-        st.plotly_chart(fig_monthly_bars, use_container_width=True)
+        st.plotly_chart(fig_monthly_bars, width="stretch")
         
     with col_deep_right:
         # 4C. FIXED VS. VARIABLE CHARGES BREAKDOWN (For Electricity) (Pie Color Mapped)
@@ -282,7 +283,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
                 color_discrete_map=color_map,  # Enforced
                 hole=0.4
             )
-            st.plotly_chart(fig_elec_breakdown, use_container_width=True)
+            st.plotly_chart(fig_elec_breakdown, width="stretch")
         else:
             st.info("Log more electricity readings to view the Fixed vs. Variable cost split.")
 
@@ -307,7 +308,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
             color_discrete_map=color_map,  # Enforced
             hole=0.4
         )
-        st.plotly_chart(fig_cost_pie, use_container_width=True)
+        st.plotly_chart(fig_cost_pie, width="stretch")
 
     with col_chart_right:
         # Pie Chart CO2 Share (Pie Color Mapped)
@@ -321,7 +322,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
             color_discrete_map=color_map,  # Enforced
             hole=0.4
         )
-        st.plotly_chart(fig_co2_pie, use_container_width=True)
+        st.plotly_chart(fig_co2_pie, width="stretch")
 
     # Actual vs Prepayment Bar Chart (Grouped Bar Color Mapped)
     st.markdown("#### Utility Settlement Check: Actual Expenses vs Prepayments Paid")
@@ -343,9 +344,96 @@ def render_page(processed_logs, stats, rates, plotly_template):
         template=plotly_template,
         color_discrete_map=color_map  # Enforced: Red (Costs) vs. Green (Prepayments)
     )
-    st.plotly_chart(fig_compare_bar, use_container_width=True)
+    st.plotly_chart(fig_compare_bar, width="stretch")
 
     st.markdown("---")
+
+    # =========================================================
+    # 5B. SMART DEVICE SUB-METER ANALYSIS (NEW)
+    # =========================================================
+    if smart_logs is not None and not smart_logs.empty:
+        st.subheader("🔌 Smart Device Log Analysis")
+        st.write("Evaluation of individual smart plugs compared to your main manual meter.")
+        
+        # Determine the latest sync date from smart device logs
+        latest_date = smart_logs['date'].max()
+        df_latest_smart = smart_logs[smart_logs['date'] == latest_date].copy()
+        
+        st.info(f"Showing measurements from date: **{latest_date}**")
+        
+        col_s1, col_s2 = st.columns(2)
+        
+        with col_s1:
+            # 1. Real-time power draw (W) of smart devices
+            fig_power = px.bar(
+                df_latest_smart,
+                x="device_name",
+                y="current_power_w",
+                color="device_name",
+                title="Current Power Draw (W)",
+                labels={"current_power_w": "Active Load (Watts)", "device_name": "Device"},
+                template=plotly_template
+            )
+            st.plotly_chart(fig_power, width="stretch")
+            
+        with col_s2:
+            # 2. Electricity Allocation Pie Chart (Smart Plugs vs Unbekannt)
+            # Retrieve average monthly consumption of total electricity from manual logs
+            elec_monthly_total = stats.get("Electricity (kWh)", {}).get("avg_monthly_consumption", 0.0)
+            
+            # Sum the monthly consumption from smart devices
+            smart_monthly_sum = df_latest_smart["month_energy_kwh"].sum()
+            
+            # Calculate the "Unknown" remainder of your main manual meter
+            unbekannt_kwh = max(0.0, elec_monthly_total - smart_monthly_sum)
+            
+            # Construct allocation DataFrame
+            allocation_data = []
+            for _, row in df_latest_smart.iterrows():
+                allocation_data.append({
+                    "Source": row["device_name"],
+                    "Monthly Consumption (kWh)": row["month_energy_kwh"]
+                })
+            
+            if unbekannt_kwh > 0:
+                allocation_data.append({
+                    "Source": "Unbekannt (Rest)",
+                    "Monthly Consumption (kWh)": unbekannt_kwh
+                })
+                
+            df_alloc = pd.DataFrame(allocation_data)
+            
+            fig_alloc_pie = px.pie(
+                df_alloc,
+                values="Monthly Consumption (kWh)",
+                names="Source",
+                title=f"Monthly Electricity Breakdown vs. Main Meter (Total: {elec_monthly_total:.1f} kWh)",
+                template=plotly_template,
+                color="Source",
+                color_discrete_map=color_map,
+                hole=0.4
+            )
+            st.plotly_chart(fig_alloc_pie, width="stretch")
+            
+        # Optional: Runtime Metrics Table
+        st.markdown("#### Smart Plugs: Activity & Usage Table")
+        st.dataframe(
+            df_latest_smart[[
+                "device_name", "ip", "current_power_w", 
+                "today_energy_kwh", "month_energy_kwh", 
+                "today_runtime_min", "month_runtime_min"
+            ]].rename(columns={
+                "device_name": "Device Name",
+                "ip": "IP Address",
+                "current_power_w": "Power (W)",
+                "today_energy_kwh": "Today (kWh)",
+                "month_energy_kwh": "Month (kWh)",
+                "today_runtime_min": "Runtime Today (Min)",
+                "month_runtime_min": "Runtime Month (Min)"
+            }),
+            width="stretch"
+        )
+        st.markdown("---")
 
     # =========================================================
     # 6. PERSONALIZED BENCHMARKS
@@ -546,7 +634,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 
-                st.plotly_chart(fig_allocated, use_container_width=True)
+                st.plotly_chart(fig_allocated, width="stretch")
                 
                 # 8B. Advanced Sparse Data Analytics
                 st.write("### 🍂 Sparse Data Analytics & Trends")
@@ -572,7 +660,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
                         template=plotly_template
                     )
                     fig_mom.add_hline(y=0.0, line_color="#94a3b8", line_dash="dash")
-                    st.plotly_chart(fig_mom, use_container_width=True)
+                    st.plotly_chart(fig_mom, width="stretch")
                     
                 with col_col2:
                     # Seasonal Consumption Profile Grouping
@@ -609,7 +697,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
                                       "<b>Avg Monthly Cost:</b> €%{customdata[0]:,.2f}<extra></extra>",
                         customdata=df_seasonal[['avg_cost']]
                     )
-                    st.plotly_chart(fig_season, use_container_width=True)
+                    st.plotly_chart(fig_season, width="stretch")
                 
             else:
                 st.caption(f"Insufficient historical data to segment monthly allocated chart for {selected_meter_chart}.")
@@ -630,7 +718,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
             template=plotly_template,
             color_discrete_map=color_map  # Enforced
         )
-        st.plotly_chart(fig_cum, use_container_width=True)
+        st.plotly_chart(fig_cum, width="stretch")
         
         active_intervals = processed_logs[processed_logs['days_elapsed'] > 0]
         if not active_intervals.empty:
@@ -645,7 +733,7 @@ def render_page(processed_logs, stats, rates, plotly_template):
                 template=plotly_template,
                 color_discrete_map=color_map  # Enforced
             )
-            st.plotly_chart(fig_daily_cost, use_container_width=True)
+            st.plotly_chart(fig_daily_cost, width="stretch")
 
             # Daily Usage Rates Line (Line Color Mapped)
             fig_rate = px.line(
@@ -663,4 +751,4 @@ def render_page(processed_logs, stats, rates, plotly_template):
                 color_discrete_map=color_map  # Enforced
             )
             fig_rate.update_yaxes(matches=None)
-            st.plotly_chart(fig_rate, use_container_width=True)
+            st.plotly_chart(fig_rate, width="stretch")
