@@ -16,6 +16,10 @@ import ui_dashboard
 import ui_log_consumption
 import ui_profile
 import ui_manage_history
+import ui_devices
+
+# Cookie-Controller für persistentes Login
+from streamlit_cookies_controller import CookieController
 
 # Set Page Config
 st.set_page_config(
@@ -24,7 +28,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 4. Database Connection Check
+# Database Connection Check
 db_connection_ok, connection_error_detail = db.check_db_connection()
 
 if not db_connection_ok:
@@ -43,10 +47,31 @@ if "theme_preference" not in st.session_state:
 
 styles.inject_theme(st.session_state.theme_preference)
 
-# --- SESSION STATE & AUTH PORTAL ---
+# --- COOKIE-BASED SESSION RESTORATION ---
+cookie_controller = CookieController()
+
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# Auto-Login-Versuch ausführen, falls kein User in der Session ist
+if st.session_state.user is None:
+    try:
+        saved_session = cookie_controller.get("supabase_session")
+        if saved_session and isinstance(saved_session, dict):
+            # Session in Supabase wiederherstellen
+            res = auth.supabase.auth.set_session(
+                saved_session["access_token"], 
+                saved_session["refresh_token"]
+            )
+            if res.user:
+                st.session_state.user = {
+                    "id": res.user.id,
+                    "email": res.user.email
+                }
+    except Exception:
+        pass # Ignoriere Fehler bei fehlenden/ungültigen Cookies
+
+# --- AUTH PORTAL ---
 if st.session_state.user is None:
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
@@ -85,9 +110,17 @@ if st.session_state.user is None:
                         else:
                             st.error(message)
                     else:
-                        user = auth.authenticate_user(email_input, password_input)
-                        if user:
-                            st.session_state.user = user
+                        user_data = auth.authenticate_user(email_input, password_input)
+                        if user_data:
+                            st.session_state.user = {
+                                "id": user_data["id"],
+                                "email": user_data["email"]
+                            }
+                            # Session dauerhaft im Browser-Cookie sichern (Gültigkeit z.B. 30 Tage)
+                            cookie_controller.set("supabase_session", {
+                                "access_token": user_data["access_token"],
+                                "refresh_token": user_data["refresh_token"]
+                            })
                             st.rerun()
                         else:
                             st.error("Invalid email or password.")
@@ -96,6 +129,9 @@ if st.session_state.user is None:
 # User Session Active
 current_user_id = st.session_state.user["id"]
 current_username = st.session_state.user["email"]
+
+# Print the UUID to your terminal console for debugging (Console Only)
+print(f"\n--- DEBUG: Current Logged-In User UUID: {current_user_id} ---\n", flush=True)
 
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.title("Utility Tracker")
@@ -110,6 +146,12 @@ styles.inject_theme(st.session_state.theme_preference)
 plotly_template = "plotly_dark" if st.session_state.theme_preference == "🌙 Dark Mode" else "plotly_white"
 
 if st.sidebar.button("Logout"):
+    # Cookies und Session State beim Logout leeren
+    try:
+        cookie_controller.remove("supabase_session")
+        auth.supabase.auth.sign_out()
+    except Exception:
+        pass
     st.session_state.user = None
     st.rerun()
 
@@ -121,7 +163,7 @@ else:
 
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard Overview", "Log Consumption", "Profile & Tariff Settings", "Manage History"]
+    ["Dashboard Overview", "Log Consumption", "Device Analysis", "Profile & Tariff Settings", "Manage History"]
 )
 
 # Load State for Current Logged In User
@@ -136,6 +178,9 @@ if page == "Dashboard Overview":
 
 elif page == "Log Consumption":
     ui_log_consumption.render_page(current_user_id, logs)
+
+elif page == "Device Analysis":
+    ui_devices.render_page(current_user_id, stats, rates)
 
 elif page == "Profile & Tariff Settings":
     ui_profile.render_page(current_user_id, rates)

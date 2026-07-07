@@ -49,8 +49,14 @@ def authenticate_user(email, password):
             "email": email_clean,
             "password": password
         })
-        if response.user:
-            return {"id": response.user.id, "email": response.user.email}
+        if response.user and response.session:
+            # Gibt User-Daten UND die Session-Tokens zur Persistierung zurück
+            return {
+                "id": response.user.id, 
+                "email": response.user.email,
+                "access_token": response.session.access_token,
+                "refresh_token": response.session.refresh_token
+            }
     except Exception:
         return None
     return None

@@ -74,23 +74,54 @@ def initialize_database():
                 month_runtime_min INTEGER
             )
         """)
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                user_id TEXT, 
+                device_name TEXT, 
+                device_group TEXT DEFAULT 'Sonstiges',
+                avg_yearly_consumption_kwh REAL DEFAULT 0.0,
+                avg_yearly_water_m3 REAL DEFAULT 0.0,
+                UNIQUE (user_id, device_name)
+            )
+        """)
     else:
         execute_db("CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, date DATE, meter VARCHAR(100), reading DOUBLE PRECISION)")
         execute_db("CREATE TABLE IF NOT EXISTS rates (user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE, electricity_kwh DOUBLE PRECISION, electricity_base DOUBLE PRECISION, hot_water_mwh DOUBLE PRECISION, cold_water_m3 DOUBLE PRECISION, electricity_prepayment DOUBLE PRECISION, hot_water_prepayment DOUBLE PRECISION, cold_water_prepayment DOUBLE PRECISION, household_size INTEGER DEFAULT 1, apartment_size DOUBLE PRECISION DEFAULT 50.0)")
         execute_db("""
             CREATE TABLE IF NOT EXISTS smart_device_logs (
-                id SERIAL PRIMARY KEY, 
-                user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, 
-                date DATE, 
-                device_name VARCHAR(100), 
-                ip VARCHAR(45), 
-                current_power_w DOUBLE PRECISION, 
-                today_energy_kwh DOUBLE PRECISION, 
-                month_energy_kwh DOUBLE PRECISION, 
-                today_runtime_min INTEGER, 
-                month_runtime_min INTEGER
+                id SERIAL PRIMARY KEY, user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, date DATE, device_name VARCHAR(100), ip VARCHAR(45), 
+                current_power_w DOUBLE PRECISION, today_energy_kwh DOUBLE PRECISION, month_energy_kwh DOUBLE PRECISION, today_runtime_min INTEGER, month_runtime_min INTEGER
             )
         """)
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS devices (
+                id SERIAL PRIMARY KEY, 
+                user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, 
+                device_name VARCHAR(100), 
+                device_group VARCHAR(100) DEFAULT 'Sonstiges',
+                avg_yearly_consumption_kwh DOUBLE PRECISION DEFAULT 0.0,
+                avg_yearly_water_m3 DOUBLE PRECISION DEFAULT 0.0,
+                UNIQUE (user_id, device_name)
+            )
+        """)
+
+    # Sicherheits-Migrationen für bestehende Installationen
+    try:
+        if is_sqlite:
+            execute_db("ALTER TABLE devices ADD COLUMN avg_yearly_water_m3 REAL DEFAULT 0.0")
+        else:
+            execute_db("ALTER TABLE devices ADD COLUMN avg_yearly_water_m3 DOUBLE PRECISION DEFAULT 0.0")
+    except Exception:
+        pass
+
+    try:
+        if is_sqlite:
+            execute_db("ALTER TABLE devices ADD COLUMN device_group TEXT DEFAULT 'Sonstiges'")
+        else:
+            execute_db("ALTER TABLE devices ADD COLUMN device_group VARCHAR(100) DEFAULT 'Sonstiges'")
+    except Exception:
+        pass
 
     try:
         df_rates_check = run_query("SELECT * FROM rates LIMIT 1")
@@ -161,3 +192,28 @@ def load_smart_device_logs(user_id):
     if not df.empty:
         df['date'] = pd.to_datetime(df['date']).dt.date
     return df
+
+# Hilfsfunktionen für das Speichern und Löschen statischer Benchmarks
+def load_devices(user_id):
+    return run_query("SELECT * FROM devices WHERE user_id = :uid ORDER BY device_name ASC", {"uid": user_id})
+
+def save_device(user_id, device_name, device_group, avg_yearly_kwh, avg_yearly_water_m3):
+    is_sqlite = engine.dialect.name == 'sqlite'
+    if is_sqlite:
+        execute_db("""
+            INSERT OR REPLACE INTO devices (user_id, device_name, device_group, avg_yearly_consumption_kwh, avg_yearly_water_m3)
+            VALUES (:uid, :name, :group, :yearly_kwh, :yearly_water)
+        """, {"uid": user_id, "name": device_name, "group": device_group, "yearly_kwh": avg_yearly_kwh, "yearly_water": avg_yearly_water_m3})
+    else:
+        execute_db("""
+            INSERT INTO devices (user_id, device_name, device_group, avg_yearly_consumption_kwh, avg_yearly_water_m3)
+            VALUES (:uid, :name, :group, :yearly_kwh, :yearly_water)
+            ON CONFLICT (user_id, device_name) 
+            DO UPDATE SET 
+                device_group = EXCLUDED.device_group,
+                avg_yearly_consumption_kwh = EXCLUDED.avg_yearly_consumption_kwh,
+                avg_yearly_water_m3 = EXCLUDED.avg_yearly_water_m3
+        """, {"uid": user_id, "name": device_name, "group": device_group, "yearly_kwh": avg_yearly_kwh, "yearly_water": avg_yearly_water_m3})
+
+def delete_device(user_id, device_id):
+    execute_db("DELETE FROM devices WHERE user_id = :uid AND id = :did", {"uid": user_id, "did": int(device_id)})
