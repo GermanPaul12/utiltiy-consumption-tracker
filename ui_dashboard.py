@@ -86,6 +86,34 @@ def calculate_monthly_allocated_consumption(processed_logs, rates):
     return monthly_data
 
 
+def get_daily_prorated_electricity(processed_logs):
+    """
+    Interpoliert die unregelmäßigen manuellen Stromzählerstände in tägliche kWh-Verbrauchswerte.
+    """
+    elec_df = processed_logs[processed_logs['meter'] == "Electricity (kWh)"].copy()
+    if len(elec_df) < 2:
+        return pd.DataFrame(columns=["date", "total_daily_kwh"])
+    
+    elec_df = elec_df.sort_values(by="date")
+    first_date = elec_df['date'].iloc[0]
+    last_date = elec_df['date'].iloc[-1]
+    
+    daily_records = []
+    
+    for i in range(1, len(elec_df)):
+        start = elec_df.iloc[i-1]['date']
+        end = elec_df.iloc[i]['date']
+        days = (end - start).days
+        if days > 0:
+            daily_rate = (elec_df.iloc[i]['reading'] - elec_df.iloc[i-1]['reading']) / days
+            curr = start + datetime.timedelta(days=1)
+            while curr <= end:
+                daily_records.append({"date": curr, "total_daily_kwh": daily_rate})
+                curr += datetime.timedelta(days=1)
+                
+    return pd.DataFrame(daily_records)
+
+
 def get_season_name(month_str):
     try:
         month = int(month_str.split("-")[1])
@@ -121,7 +149,7 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
         "Prepayments Paid to Date": "#22c55e",       # Green
         "Variable (Usage)": "#eab308",               # Yellow
         "Fixed (Base Standing Charge)": "#ef4444",    # Red
-        "Unbekannt (Rest)": "#64748b"                # Slate grey for remainder
+        "Unbekannt (Rest)": "#64748b"                # Slate grey
     }
 
     # Basic Calculations
@@ -349,73 +377,91 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
     st.markdown("---")
 
     # =========================================================
-    # 5B. SMART DEVICE SUB-METER ANALYSIS (NEW)
+    # 5B. SMART DEVICE SUB-METER ANALYSIS
     # =========================================================
     if smart_logs is not None and not smart_logs.empty:
         st.subheader("🔌 Smart Device Log Analysis")
-        st.write("Evaluation of individual smart plugs compared to your main manual meter.")
+        st.write("Detailed historical breakdown of individual smart plugs compared directly to your main meter.")
         
-        # Determine the latest sync date from smart device logs
-        latest_date = smart_logs['date'].max()
-        df_latest_smart = smart_logs[smart_logs['date'] == latest_date].copy()
+        # 1. Standardize and deduplicate smart logs
+        smart_logs['date'] = pd.to_datetime(smart_logs['date']).dt.date
+        df_smart_clean = smart_logs.groupby(["date", "device_name"]).first().reset_index()
+        
+        # Latest sync date metrics
+        latest_date = df_smart_clean['date'].max()
+        df_latest_smart = df_smart_clean[df_smart_clean['date'] == latest_date].copy()
         
         st.info(f"Showing measurements from date: **{latest_date}**")
         
-        col_s1, col_s2 = st.columns(2)
+        # A. Line Chart: Smart Device Daily Energy Consumption Over Time
+        fig_smart_time = px.line(
+            df_smart_clean,
+            x="date",
+            y="today_energy_kwh",
+            color="device_name",
+            markers=True,
+            title="Daily Smart Plug Energy Consumption Over Time (kWh)",
+            labels={"today_energy_kwh": "Energy Consumed Today (kWh)", "date": "Date", "device_name": "Device Group"},
+            template=plotly_template
+        )
+        st.plotly_chart(fig_smart_time, width="stretch")
         
-        with col_s1:
-            # 1. Real-time power draw (W) of smart devices
-            fig_power = px.bar(
-                df_latest_smart,
-                x="device_name",
-                y="current_power_w",
-                color="device_name",
-                title="Current Power Draw (W)",
-                labels={"current_power_w": "Active Load (Watts)", "device_name": "Device"},
-                template=plotly_template
-            )
-            st.plotly_chart(fig_power, width="stretch")
+        # B. Advanced Comparison with Total Prorated Electricity
+        df_daily_manual = get_daily_prorated_electricity(processed_logs)
+        
+        if not df_daily_manual.empty:
+            # Pivot smart logs to align with manual readings on dates
+            df_smart_pivot = df_smart_clean.pivot(index="date", columns="device_name", values="today_energy_kwh").fillna(0.0)
+            df_compare = pd.merge(df_daily_manual, df_smart_pivot, on="date", how="inner")
             
-        with col_s2:
-            # 2. Electricity Allocation Pie Chart (Smart Plugs vs Unbekannt)
-            # Retrieve average monthly consumption of total electricity from manual logs
-            elec_monthly_total = stats.get("Electricity (kWh)", {}).get("avg_monthly_consumption", 0.0)
-            
-            # Sum the monthly consumption from smart devices
-            smart_monthly_sum = df_latest_smart["month_energy_kwh"].sum()
-            
-            # Calculate the "Unknown" remainder of your main manual meter
-            unbekannt_kwh = max(0.0, elec_monthly_total - smart_monthly_sum)
-            
-            # Construct allocation DataFrame
-            allocation_data = []
-            for _, row in df_latest_smart.iterrows():
-                allocation_data.append({
-                    "Source": row["device_name"],
-                    "Monthly Consumption (kWh)": row["month_energy_kwh"]
-                })
-            
-            if unbekannt_kwh > 0:
-                allocation_data.append({
-                    "Source": "Unbekannt (Rest)",
-                    "Monthly Consumption (kWh)": unbekannt_kwh
-                })
+            if not df_compare.empty:
+                device_cols = list(df_smart_pivot.columns)
+                df_compare["Smart_Sum"] = df_compare[device_cols].sum(axis=1)
                 
-            df_alloc = pd.DataFrame(allocation_data)
+                # Calculate the remainder as Unbekannt (Rest)
+                df_compare["Unbekannt (Rest)"] = (df_compare["total_daily_kwh"] - df_compare["Smart_Sum"]).clip(lower=0.0)
+                
+                melt_cols = device_cols + ["Unbekannt (Rest)"]
+                df_compare_melted = df_compare.melt(
+                    id_vars=["date"],
+                    value_vars=melt_cols,
+                    var_name="Category",
+                    value_name="Daily Energy (kWh)"
+                )
+                
+                st.markdown("#### ⚖️ Smart Devices vs. Total Electricity Consumption")
+                st.write("Compare the proportion of energy tracked by your smart devices against the total daily electricity consumption calculated from your manual meter readings.")
+                
+                # Scaling toggle selector
+                scale_mode = st.radio(
+                    "Choose Y-Axis Scale Transformation:",
+                    ["Linear Scale (Normal)", "Logarithmic Scale (Log10 - Best for highlighting smaller device trends)"],
+                    horizontal=True
+                )
+                
+                fig_compare_stacked = px.area(
+                    df_compare_melted,
+                    x="date",
+                    y="Daily Energy (kWh)",
+                    color="Category",
+                    title="Daily Electricity Allocation Breakdown Over Time",
+                    labels={"Daily Energy (kWh)": "Consumption (kWh / Day)", "date": "Date"},
+                    template=plotly_template,
+                    color_discrete_map=color_map
+                )
+                
+                if "Logarithmic" in scale_mode:
+                    fig_compare_stacked.update_yaxes(type="log")
+                    fig_compare_stacked.update_layout(title="Daily Electricity Allocation Breakdown Over Time (Logarithmic Scale)")
+                    
+                st.plotly_chart(fig_compare_stacked, width="stretch")
+                
+            else:
+                st.warning("No overlapping dates found between manual meter logs and smart device logs to calculate the remainder analysis.")
+        else:
+            st.info("Log at least two manual electricity readings to enable the smart device comparison model.")
             
-            fig_alloc_pie = px.pie(
-                df_alloc,
-                values="Monthly Consumption (kWh)",
-                names="Source",
-                title=f"Monthly Electricity Breakdown vs. Main Meter (Total: {elec_monthly_total:.1f} kWh)",
-                template=plotly_template,
-                color="Source",
-                color_discrete_map=color_map,
-                hole=0.4
-            )
-            st.plotly_chart(fig_alloc_pie, width="stretch")
-            
-        # Optional: Runtime Metrics Table
+        # Summary Row Table
         st.markdown("#### Smart Plugs: Activity & Usage Table")
         st.dataframe(
             df_latest_smart[[
@@ -434,6 +480,81 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
             width="stretch"
         )
         st.markdown("---")
+
+    # =========================================================
+    # 5C. CROSS-UTILITY NORMALIZATION & LOG ANALYSIS (NEW)
+    # =========================================================
+    st.subheader("📈 Cross-Utility Normalization & Log Analysis")
+    st.write(
+        "Comparing utilities with vastly different scales (e.g., Megawatt hours of heating vs. Liters of water) "
+        "is challenging. Below are two normalized, scale-free comparisons designed to balance these differences:"
+    )
+    
+    active_intervals = processed_logs[processed_logs['days_elapsed'] > 0].copy()
+    
+    if len(active_intervals['meter'].unique()) > 1:
+        col_norm1, col_norm2 = st.columns(2)
+        
+        with col_norm1:
+            st.markdown("#### 💵 Logarithmic Daily Financial Burn Rate (€ / Day)")
+            st.caption(
+                "By converting physical units into daily financial costs (€/day), we establish a common scale. "
+                "A **Logarithmic Y-Axis** ensures that small water costs (e.g., €0.20/day) remain visible alongside "
+                "large electricity or heating spikes (e.g., €15.00/day)."
+            )
+            
+            fig_log_burn = px.line(
+                active_intervals,
+                x='date',
+                y='daily_cost_rate',
+                color='meter',
+                markers=True,
+                title="Daily Burn Rate (€ / Day) - Logarithmic Scale",
+                labels={"daily_cost_rate": "Burn Rate (€ / Day)", "date": "Reading Date", "meter": "Utility"},
+                template=plotly_template,
+                color_discrete_map=color_map
+            )
+            fig_log_burn.update_yaxes(type="log")
+            st.plotly_chart(fig_log_burn, width="stretch")
+            
+        with col_norm2:
+            st.markdown("#### 📊 Unit-Free Relative Fluctuations (% of baseline)")
+            st.caption(
+                "This chart normalizes all physical consumption units by expressing them as a percentage "
+                "of your utility-specific average. This isolates behavioral changes from the scale of the unit."
+            )
+            
+            # Group and calculate percent of baseline
+            normalized_list = []
+            for meter_name in active_intervals['meter'].unique():
+                sub_df = active_intervals[active_intervals['meter'] == meter_name].copy()
+                avg_rate = sub_df['daily_rate'].mean()
+                if avg_rate > 0:
+                    sub_df['percent_of_baseline'] = (sub_df['daily_rate'] / avg_rate) * 100
+                    normalized_list.append(sub_df)
+            
+            if normalized_list:
+                df_normalized = pd.concat(normalized_list).sort_values(by='date')
+                
+                fig_norm_fluct = px.line(
+                    df_normalized,
+                    x='date',
+                    y='percent_of_baseline',
+                    color='meter',
+                    markers=True,
+                    title="Usage Fluctuations relative to Personal Baseline (Average = 100%)",
+                    labels={"percent_of_baseline": "Relative Usage (% of Personal Average)", "date": "Reading Date"},
+                    template=plotly_template,
+                    color_discrete_map=color_map
+                )
+                fig_norm_fluct.add_hline(y=100.0, line_dash="dash", line_color="#64748b", annotation_text="Your Baseline (100%)")
+                st.plotly_chart(fig_norm_fluct, width="stretch")
+            else:
+                st.caption("Insufficient usage delta to calculate standard baseline.")
+                
+        st.markdown("---")
+    else:
+        st.info("Log entries for at least two different utilities to activate cross-utility normalization metrics.")
 
     # =========================================================
     # 6. PERSONALIZED BENCHMARKS
