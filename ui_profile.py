@@ -97,6 +97,12 @@ def render_page(current_user_id, rates):
                 "apartment_size": a_size
             }
             db.save_rates(current_user_id, new_rates)
+            
+            # CACHE-BUSTING: Tarife und Berechnungen verwerfen
+            st.session_state.pop("rates", None)
+            st.session_state.pop("processed_logs", None)
+            st.session_state.pop("stats", None)
+            
             st.success("Profile and tariffs successfully updated.")
             st.rerun()
 
@@ -175,6 +181,10 @@ def render_page(current_user_id, rates):
                 # UX-Verlauf: Zeigt dem User präzise an, welcher DB-Schritt gerade läuft
                 with st.spinner(f"Verbinde mit Cloud-Datenbank... Speichere '{target_name}'"):
                     db.save_device(current_user_id, target_name, d_group, d_elec, d_water)
+                
+                # CACHE-BUSTING: Geräteliste im Cache verwerfen
+                st.session_state.pop("devices", None)
+                
                 st.toast(f"Gerät '{target_name}' erfolgreich in Datenbank gesichert!", icon="💾")
                 st.rerun()
             else:
@@ -188,6 +198,10 @@ def render_page(current_user_id, rates):
             if delete_submitted:
                 with st.spinner(f"Lösche Eintrag für '{initial_name}' aus Datenbank..."):
                     db.delete_device(current_user_id, active_device_id)
+                
+                # CACHE-BUSTING: Geräteliste im Cache verwerfen
+                st.session_state.pop("devices", None)
+                
                 st.toast(f"Eintrag für '{initial_name}' gelöscht.", icon="🗑️")
                 st.rerun()
 

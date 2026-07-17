@@ -86,6 +86,11 @@ def render_page(current_user_id, logs):
                     "reading": reading_val
                 })
             
+            # CACHE-BUSTING: Entfernt die veralteten Werte aus dem RAM
+            st.session_state.pop("logs", None)
+            st.session_state.pop("processed_logs", None)
+            st.session_state.pop("stats", None)
+            
             # Diskreter Toast zur Bestätigung
             st.toast(f"Erfolgreich {reading_val} für {meter_type} gespeichert!", icon="✅")
             st.rerun()

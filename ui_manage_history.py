@@ -87,5 +87,10 @@ def render_page(current_user_id, logs):
                 with st.spinner(f"Verbinde mit Cloud-Datenbank... Entferne Eintrag ID {target_record['id']}"):
                     db.execute_db("DELETE FROM logs WHERE id = :id", params={"id": int(target_record["id"])})
                 
+                # CACHE-BUSTING: Logs und Berechnungen verwerfen
+                st.session_state.pop("logs", None)
+                st.session_state.pop("processed_logs", None)
+                st.session_state.pop("stats", None)
+                
                 st.toast(f"Eintrag ID {target_record['id']} erfolgreich gelöscht.", icon="🗑️")
                 st.rerun()

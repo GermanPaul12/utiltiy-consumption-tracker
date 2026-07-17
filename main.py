@@ -166,11 +166,32 @@ page = st.sidebar.radio(
     ["Dashboard Overview", "Log Consumption", "Device Analysis", "Profile & Tariff Settings", "Manage History"]
 )
 
-# Load State for Current Logged In User
-rates = db.load_rates(current_user_id)
-logs = db.load_logs(current_user_id)
-smart_logs = db.load_smart_device_logs(current_user_id)
-processed_logs, stats = metrics.calculate_metrics(logs, rates)
+# --- ZENTRALISIERTES CACHING ÜBER SESSION STATE ---
+if "rates" not in st.session_state:
+    st.session_state.rates = db.load_rates(current_user_id)
+
+if "logs" not in st.session_state:
+    st.session_state.logs = db.load_logs(current_user_id)
+
+if "smart_logs" not in st.session_state:
+    st.session_state.smart_logs = db.load_smart_device_logs(current_user_id)
+
+# Wir cachen auch die statische Geräteliste, um DB-Queries auf den Unterseiten einzusparen
+if "devices" not in st.session_state:
+    st.session_state.devices = db.load_devices(current_user_id)
+
+# Berechnungen der Metriken im RAM zwischenspeichern
+if "processed_logs" not in st.session_state or "stats" not in st.session_state:
+    processed_logs, stats = metrics.calculate_metrics(st.session_state.logs, st.session_state.rates)
+    st.session_state.processed_logs = processed_logs
+    st.session_state.stats = stats
+
+# Lokale Variablen aus dem Session State zuweisen
+rates = st.session_state.rates
+logs = st.session_state.logs
+smart_logs = st.session_state.smart_logs
+processed_logs = st.session_state.processed_logs
+stats = st.session_state.stats
 
 # --- ROUTER DISPATCHER ---
 if page == "Dashboard Overview":
