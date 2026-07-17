@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import database as db
+from utils import database as db
 
 def render_page(current_user_id, stats, rates):
     st.title("Haushaltsgeräte & Benchmark-Analyse")

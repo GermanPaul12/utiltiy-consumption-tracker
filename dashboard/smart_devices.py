@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import database as db
+from utils import database as db
 from .calculations import get_daily_prorated_electricity
 
 def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map, plotly_template):

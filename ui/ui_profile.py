@@ -1,7 +1,7 @@
 # ui_profile.py
 import streamlit as st
-import database as db
-import auth
+from utils import database as db
+from utils import auth
 
 def render_page(current_user_id, rates):
     st.title("Update Profile, Tariffs & Prepayments")
@@ -115,7 +115,7 @@ def render_page(current_user_id, rates):
 
     # Liste existierender Geräte laden
     df_devices = db.load_devices(current_user_id)
-    
+    from database import execute_db
     # Auswahlliste zur Modus-Steuerung (Erstellen oder Editieren)
     device_options = ["➕ Neues Gerät hinzufügen"]
     device_records = []

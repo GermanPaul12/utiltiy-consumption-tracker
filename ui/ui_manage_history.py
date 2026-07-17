@@ -1,6 +1,6 @@
 # ui_manage_history.py
 import streamlit as st
-import database as db
+from utils import database as db
 
 def render_page(current_user_id, logs):
     st.title("Manage Data History")

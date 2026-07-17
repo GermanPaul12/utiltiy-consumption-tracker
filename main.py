@@ -6,17 +6,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 2. Import your module logic layers
-import database as db
-import auth
-import metrics
-import styles
+from utils import database as db
+from utils import auth
+from utils import metrics
+from utils import styles
 
 # 3. Import your UI Page Renderers
-import ui_dashboard
-import ui_log_consumption
-import ui_profile
-import ui_manage_history
-import ui_devices
+from ui import ui_dashboard
+from ui import ui_log_consumption
+from ui import ui_profile
+from ui import ui_manage_history
+from ui import ui_devices
 
 # Cookie-Controller für persistentes Login
 from streamlit_cookies_controller import CookieController
