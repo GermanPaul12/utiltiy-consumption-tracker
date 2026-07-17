@@ -1,43 +1,53 @@
-# ui_manage_history.py
+# ui/ui_manage_history.py
 import streamlit as st
 from utils import database as db
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 
 def render_page(current_user_id, logs):
-    st.title("Manage Data History")
-    st.write("Verwalten Sie Ihre eingetragenen Zählerstände, filtern Sie historische Daten oder korrigieren Sie Fehlbuchungen.")
+    st.title(t("history_title"))
+    st.write(t("history_subtitle"))
     
     if logs.empty:
-        st.info("No recorded database entries found.")
+        st.info(t("history_no_entries"))
         return
 
     # ---------------------------------------------------------
-    # UX-UPGRADE 1: KATEGORIE-FILTER FÜR BESSERE ÜBERSICHT
+    # HISTORIEN-FILTER (Dynamisch lokalisiert)
     # ---------------------------------------------------------
-    st.subheader("📊 Verlauf & Filterung")
+    st.subheader(t("history_filter_header"))
     
-    filter_options = [
-        "Alle Einträge anzeigen", 
-        "Electricity (kWh)", 
-        "Hot Water (MWh)", 
-        "Cold Water (m³)"
-    ]
-    selected_filter = st.selectbox("Historie filtern nach:", filter_options)
+    db_filter_options = ["all", "Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"]
+    
+    # Zuordnungstabelle der Übersetzungsschlüssel für die Filter
+    option_key_map = {
+        "all": "history_option_all",
+        "Electricity (kWh)": "log_option_elec",
+        "Hot Water (MWh)": "log_option_hw",
+        "Cold Water (m³)": "log_option_cw"
+    }
+    
+    translated_filters = [t(option_key_map[item]) for item in db_filter_options]
+    selected_filter_trans = st.selectbox(t("history_filter_label"), options=translated_filters)
+    
+    # Rück-Mapping der Filterschnittstelle auf den internen Datenbank-Schlüssel
+    selected_index = translated_filters.index(selected_filter_trans)
+    selected_filter = db_filter_options[selected_index]
     
     # Logs chronologisch absteigend sortieren für die Anzeige
     logs_sorted = logs.sort_values(by=["date", "id"], ascending=[False, False])
     
-    if selected_filter != "Alle Einträge anzeigen":
+    if selected_filter != "all":
         filtered_logs = logs_sorted[logs_sorted["meter"] == selected_filter]
     else:
         filtered_logs = logs_sorted
 
-    # Tabelle anzeigen
+    # Tabelle dynamisch lokalisiert anzeigen
     st.dataframe(
         filtered_logs.drop(columns=["user_id"], errors="ignore").rename(columns={
-            "id": "ID",
-            "date": "Erfassungsdatum",
-            "meter": "Zählerkategorie",
-            "reading": "Zählerstand (kumuliert)"
+            "id": t("history_col_id"),
+            "date": t("history_col_date"),
+            "meter": t("history_col_meter"),
+            "reading": t("history_col_reading")
         }), 
         width="stretch"
     )
@@ -45,27 +55,27 @@ def render_page(current_user_id, logs):
     st.markdown("---")
     
     # ---------------------------------------------------------
-    # UX-UPGRADE 2: SICHERES LÖSCHEN PER SELECTION & CONFIRMATION
+    # SICHERES LÖSCHEN (Vollständig übersetzt)
     # ---------------------------------------------------------
-    st.subheader("🗑️ Einträge korrigieren / entfernen")
-    st.write("Wählen Sie einen fehlerhaften Eintrag aus der Liste aus, um ihn unwiderruflich zu löschen.")
+    st.subheader(t("history_delete_header"))
+    st.write(t("history_delete_subtitle"))
     
     if filtered_logs.empty:
-        st.caption("Keine Einträge im ausgewählten Filter vorhanden.")
+        st.caption(t("history_no_filtered_entries"))
         return
 
-    # Optionen für das Dropdown-Menü lesbar formatieren
+    # Optionen für das Dropdown-Menü lesbar und lokalisiert formatieren
     delete_options = []
     for _, row in filtered_logs.iterrows():
+        # Holt die übersetzte Zählerbezeichnung
+        meter_label_trans = t(option_key_map.get(row["meter"], row["meter"]))
         delete_options.append({
             "id": row["id"],
-            "label": f"ID {row['id']} | {row['date']} | {row['meter']} | Zählerstand: {row['reading']:,.3f}"
+            "label": f"ID {row['id']} | {row['date']} | {meter_label_trans} | {t('history_reading_label')}: {row['reading']:,.3f}"
         })
         
-    # ui_manage_history.py (Korrigierter unterer Abschnitt)
-    
     target_record = st.selectbox(
-        "Zu löschenden Eintrag auswählen:",
+        t("history_delete_select_label"),
         options=delete_options,
         format_func=lambda x: x["label"] if x else ""
     )
@@ -73,18 +83,18 @@ def render_page(current_user_id, logs):
     # Sicherheitsabfrage für statische Code-Analyse (Pylance) und Laufzeit-Schutz
     if target_record is not None:
         # Zweistufige Bestätigung via Popover zum Schutz vor Fehlklicks
-        with st.popover("🗑️ Löschung bestätigen", width="stretch"):
-            st.warning(f"Sind Sie sicher, dass Sie den folgenden Eintrag unwiderruflich löschen möchten?\n\n**{target_record['label']}**")
+        with st.popover(t("history_popover_confirm"), width="stretch"):
+            st.warning(t("history_delete_warning").format(label=target_record['label']))
             
             confirm_delete = st.button(
-                "Ja, Eintrag jetzt dauerhaft löschen", 
+                t("history_delete_btn"), 
                 type="primary", 
                 width="stretch"
             )
             
             if confirm_delete:
                 # UX-Spinner & Toast während des Löschvorgangs
-                with st.spinner(f"Verbinde mit Cloud-Datenbank... Entferne Eintrag ID {target_record['id']}"):
+                with st.spinner(t("history_deleting_spinner").format(id=target_record['id'])):
                     db.execute_db("DELETE FROM logs WHERE id = :id", params={"id": int(target_record["id"])})
                 
                 # CACHE-BUSTING: Logs und Berechnungen verwerfen
@@ -92,5 +102,5 @@ def render_page(current_user_id, logs):
                 st.session_state.pop("processed_logs", None)
                 st.session_state.pop("stats", None)
                 
-                st.toast(f"Eintrag ID {target_record['id']} erfolgreich gelöscht.", icon="🗑️")
+                st.toast(t("history_success_toast").format(id=target_record['id']), icon="🗑️")
                 st.rerun()

@@ -1,21 +1,22 @@
-# ui_log_consumption.py
+# ui/ui_log_consumption.py
 import datetime
 import streamlit as st
 from utils import database as db
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 
 def render_page(current_user_id, logs):
-    st.title("Log Utility Readings")
-    st.write("Tragen Sie hier Ihre kumulierten, physischen Zählerstände ein.")
+    st.title(t("log_title"))
+    st.write(t("log_subtitle"))
     
     # ---------------------------------------------------------
-    # UX-UPGRADE: GLOBALE KATEGORIE-ÜBERSICHT
+    # GLOBALE KATEGORIE-ÜBERSICHT (Dynamisch lokalisiert)
     # ---------------------------------------------------------
-    st.subheader("📋 Zuletzt erfasste Zählerstände (Übersicht)")
+    st.subheader(t("log_last_readings_header"))
     
     categories = [
-        {"name": "Electricity (kWh)", "icon": "⚡ Strom", "unit": "kWh"},
-        {"name": "Hot Water (MWh)", "icon": "🔥 Warmwasser", "unit": "MWh"},
-        {"name": "Cold Water (m³)", "icon": "💧 Kaltwasser", "unit": "m³"}
+        {"name": "Electricity (kWh)", "key_label": "log_cat_elec", "unit": "kWh"},
+        {"name": "Hot Water (MWh)", "key_label": "log_cat_hw", "unit": "MWh"},
+        {"name": "Cold Water (m³)", "key_label": "log_cat_cw", "unit": "m³"}
     ]
     
     col_elec, col_hw, col_cw = st.columns(3)
@@ -31,51 +32,68 @@ def render_page(current_user_id, logs):
                 last_dt = cat_entries.iloc[-1]['date']
                 last_values_map[cat["name"]] = last_val
                 st.info(
-                    f"**{cat['icon']}**"
-                    f"\n* Zählerstand: **{last_val:,.3f} {cat['unit']}**"
-                    f"\n* Erfasst am: {last_dt}"
+                    f"**{t(cat['key_label'])}**\n* "
+                    f"{t('log_last_val').format(val=last_val, unit=cat['unit'])}\n* "
+                    f"{t('log_recorded_on').format(date=last_dt)}"
                 )
             else:
                 last_values_map[cat["name"]] = 0.0
                 st.warning(
-                    f"**{cat['icon']}**"
-                    f"\n* Noch keine Daten erfasst."
+                    f"**{t(cat['key_label'])}**\n* "
+                    f"{t('log_no_data')}"
                 )
 
     st.markdown("---")
-    st.subheader("✍️ Neuen Zählerwert eintragen")
+    st.subheader(t("log_new_entry_header"))
+    
+    # Sprachneutrale Datenbank-Spezifikationen der Zählertypen
+    db_meters = ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"]
+    
+    # Zuordnungstabelle der Übersetzungsschlüssel für die Auswahlliste
+    option_key_map = {
+        "Electricity (kWh)": "log_option_elec",
+        "Hot Water (MWh)": "log_option_hw",
+        "Cold Water (m³)": "log_option_cw"
+    }
+    
+    translated_meters = [t(option_key_map[item]) for item in db_meters]
     
     with st.form("log_form", clear_on_submit=True):
         col_input1, col_input2 = st.columns(2)
         
         with col_input1:
-            log_date = st.date_input("Date of Reading", datetime.date.today())
-            meter_type = st.selectbox(
-                "Select Utility Meter",
-                ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"]
+            log_date = st.date_input(t("log_date_label"), datetime.date.today())
+            selected_trans = st.selectbox(
+                t("log_meter_select_label"),
+                options=translated_meters
             )
+            
+            # Rück-Mapping der übersetzten Auswahl in den englischen Datenbank-Zählertyp
+            selected_index = translated_meters.index(selected_trans)
+            meter_type = db_meters[selected_index]
             
         with col_input2:
             last_val_selected = last_values_map.get(meter_type, 0.0)
-            st.write(f"Ausgewählter Zähler: **{meter_type}**")
-            st.write(f"Ihr letzter Zählerstand hierzu: **{last_val_selected:,.3f}**")
+            
+            st.write(t("log_selected_meter").format(meter=t(option_key_map[meter_type])))
+            st.write(t("log_last_val_comparison").format(val=last_val_selected))
             
             reading_val = st.number_input(
-                "Cumulative Reading Value", 
+                t("log_input_reading_label"), 
                 min_value=0.0, 
                 step=0.001, 
                 format="%.3f"
             )
             
-        submitted = st.form_submit_button("Submit Reading")
+        submitted = st.form_submit_button(t("log_submit_btn"))
         
         if submitted:
             # Plausibilitätsprüfung
             if last_val_selected > 0 and reading_val < last_val_selected:
-                st.warning(f"Note: Entered reading ({reading_val}) is lower than the last recorded reading ({last_val_selected}).")
+                st.warning(t("log_plausibility_warning").format(reading=reading_val, last=last_val_selected))
             
-            # UX-Verlauf: Präziser Ladestatus für den Schreibvorgang
-            with st.spinner(f"💾 Übertrage {reading_val} für '{meter_type}' an die Cloud-Datenbank..."):
+            # Präziser Ladespinner für den Schreibvorgang
+            with st.spinner(t("log_saving_spinner").format(reading=reading_val, meter=t(option_key_map[meter_type]))):
                 db.execute_db("""
                     INSERT INTO logs (user_id, date, meter, reading) 
                     VALUES (:uid, :date, :meter, :reading)
@@ -92,5 +110,5 @@ def render_page(current_user_id, logs):
             st.session_state.pop("stats", None)
             
             # Diskreter Toast zur Bestätigung
-            st.toast(f"Erfolgreich {reading_val} für {meter_type} gespeichert!", icon="✅")
+            st.toast(t("log_success_toast").format(reading=reading_val, meter=t(option_key_map[meter_type])), icon="✅")
             st.rerun()

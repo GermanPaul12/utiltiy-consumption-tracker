@@ -1,6 +1,7 @@
 # ui/ui_dashboard.py
 import streamlit as st
 from streamlit_option_menu import option_menu
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 
 # Import der einzelnen Unter-Komponenten aus dem dashboard/ Ordner
 from dashboard import metrics_cards
@@ -10,12 +11,25 @@ from dashboard import history_timeline
 
 def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
     
+    # Interne, sprachneutrale Navigationsschlüssel
+    menu_items = ["Finance & Overview", "Smart Plugs & Devices", "History & Analytics"]
+    
+    # Zuordnungstabelle der Übersetzungsschlüssel
+    translation_key_map = {
+        "Finance & Overview": "dash_nav_finance",
+        "Smart Plugs & Devices": "dash_nav_smart_plugs",
+        "History & Analytics": "dash_nav_history"
+    }
+    
+    # Übersetzte Bezeichnungen erzeugen
+    translated_options = [t(translation_key_map[item]) for item in menu_items]
+    
     # ---------------------------------------------------------
-    # MODERNE BOOTSTRAP-NAVBAR (ECHTES LAZY-LOADING)
+    # MODERNE BOOTSTRAP-NAVBAR (ECHTES LAZY-LOADING & DYNAMISCH)
     # ---------------------------------------------------------
-    dashboard_view = option_menu(
-        menu_title=None,  # Kein Menü-Titel für eine saubere Navbar-Optik
-        options=["Finanzen & Übersicht", "Smart Plugs & Geräte", "Historie & Analysen"],
+    selected_page_translated = option_menu(
+        menu_title=None,
+        options=translated_options,
         icons=["cash-coin", "plug-fill", "graph-up-arrow"],  # Bootstrap Icons
         menu_icon="cast",
         default_index=0,
@@ -32,6 +46,10 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
             "nav-link-selected": {"background-color": "#0284c7", "font-weight": "600"},
         }
     )
+    
+    # Übersetztes Ereignis wieder in interne ID mappen
+    selected_index = translated_options.index(selected_page_translated)
+    dashboard_view = menu_items[selected_index]
     
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -67,8 +85,8 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
     # ---------------------------------------------------------
     # LAZY-LOADING: NUR DEN AUSGEWÄHLTEN BEREICH RENDERN
     # ---------------------------------------------------------
-    if dashboard_view == "Finanzen & Übersicht":
-        st.caption("ℹ️ Note: Baseline calculations require at least two sequential readings per meter.")
+    if dashboard_view == "Finance & Overview":
+        st.caption(t("dash_baseline_note"))
         
         # Rendert Metrik-Karten & finanzielle Bilanzen
         metrics_cards.render(
@@ -79,8 +97,8 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
         
         # Standard-Tabs für die einzelnen Utility-Klassen
         st.markdown("---")
-        st.subheader("Utility Specific Breakdown")
-        tab_elec, tab_hw, tab_cw = st.tabs(["⚡ Electricity", "🔥 Hot Water (Fernwärme)", "💧 Cold Water"])
+        st.subheader(t("dash_utility_breakdown_header"))
+        tab_elec, tab_hw, tab_cw = st.tabs([t("dash_tab_elec"), t("dash_tab_hw"), t("dash_tab_cw")])
         
         for tab, m_name, suffix in zip([tab_elec, tab_hw, tab_cw], ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"], ["kWh", "MWh", "m³"]):
             with tab:
@@ -88,23 +106,23 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
                     s = stats[m_name]
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Total Consumption", f"{s['total_consumption']:,.3f} {suffix}")
-                        st.metric("Daily Avg Consumption", f"{s['avg_daily_consumption']:.4f} {suffix}/day")
-                        st.metric("Monthly Avg Consumption", f"{s['avg_monthly_consumption']:.3f} {suffix}/month")
+                        st.metric(t("dash_metric_total_consumption"), f"{s['total_consumption']:,.3f} {suffix}")
+                        st.metric(t("dash_metric_daily_avg_consumption"), f"{s['avg_daily_consumption']:.4f} {suffix}/day")
+                        st.metric(t("dash_metric_monthly_avg_consumption"), f"{s['avg_monthly_consumption']:.3f} {suffix}/month")
                     with col2:
-                        st.metric("Total Cost", f"€{s['total_cost']:,.2f}")
-                        st.metric("Daily Avg Cost", f"€{s['avg_daily_cost']:.2f}/day")
-                        st.metric("Monthly Avg Cost", f"€{s['avg_monthly_cost']:.2f}/month")
+                        st.metric(t("dash_metric_total_cost"), f"€{s['total_cost']:,.2f}")
+                        st.metric(t("dash_metric_daily_avg_cost"), f"€{s['avg_daily_cost']:.2f}/day")
+                        st.metric(t("dash_metric_monthly_avg_cost"), f"€{s['avg_monthly_cost']:.2f}/month")
                     with col3:
-                        st.metric("Monthly Prepayment", f"€{s['monthly_prepayment']:.2f}/month")
+                        st.metric(t("dash_metric_monthly_prepayment"), f"€{s['monthly_prepayment']:.2f}/month")
                         if s['projected_annual_standing'] >= 0:
-                            st.metric("Projected Annual Refund", f"€{s['projected_annual_standing']:.2f}")
+                            st.metric(t("dash_metric_projected_refund"), f"€{s['projected_annual_standing']:.2f}")
                         else:
-                            st.metric("Projected Annual Backpayment", f"-€{abs(s['projected_annual_standing']):.2f}", delta_color="inverse")
+                            st.metric(t("dash_metric_projected_backpayment"), f"-€{abs(s['projected_annual_standing']):.2f}", delta_color="inverse")
                 else:
-                    st.info(f"Log at least two readings to calculate {m_name} stats.")
+                    st.info(t("dash_insufficient_data"))
 
-    elif dashboard_view == "Smart Plugs & Geräte":
+    elif dashboard_view == "Smart Plugs & Devices":
         # Rendert nur die Smart Plugs und Kosten-Breakdowns, falls vorhanden
         if smart_logs is not None and not smart_logs.empty:
             current_user_id = st.session_state.user["id"]
@@ -112,9 +130,9 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
                 current_user_id, processed_logs, smart_logs, stats, rates, color_map, plotly_template
             )
         else:
-            st.info("Keine aktiven Smart-Device-Logs in der Datenbank gefunden.")
+            st.info(t("dash_no_smart_logs"))
 
-    elif dashboard_view == "Historie & Analysen":
+    elif dashboard_view == "History & Analytics":
         # Rendert die logarithmierten und normalisierten Auswertungen
         cross_utility.render(processed_logs, color_map, plotly_template)
         

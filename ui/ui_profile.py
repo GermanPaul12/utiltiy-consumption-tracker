@@ -4,17 +4,18 @@ import pandas as pd
 import streamlit as st
 from utils import database as db
 from utils import auth
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 
 def render_page(current_user_id, rates):
-    st.title("Update Profile, Tariffs & Prepayments")
-    st.write("Configure your domestic household size, tariffs, and monthly prepayment plans (*Abschlagszahlungen*) below.")
+    st.title(t("profile_title"))
+    st.write(t("profile_subtitle"))
 
     with st.form("settings_form"):
-        st.subheader("🏠 Household & Apartment Profile")
+        st.subheader(t("profile_household_header"))
         p_col1, p_col2 = st.columns(2)
         with p_col1:
             h_size = st.number_input(
-                "Household Size (Number of occupants)",
+                t("profile_household_size"),
                 min_value=1,
                 max_value=15,
                 value=int(rates.get("household_size", 1)),
@@ -26,11 +27,11 @@ def render_page(current_user_id, rates):
             if rates.get("move_in_date"):
                 default_move_in = pd.to_datetime(rates.get("move_in_date")).date()
                 
-            move_in_val = st.date_input("Einzugsdatum (Einzug in die Wohnung)", default_move_in)
+            move_in_val = st.date_input(t("profile_move_in_date"), default_move_in)
             
         with p_col2:
             a_size = st.number_input(
-                "Apartment Size (Square Meters - m²)",
+                t("profile_apartment_size"),
                 min_value=5.0,
                 max_value=1000.0,
                 value=float(rates.get("apartment_size", 50.0)),
@@ -43,63 +44,63 @@ def render_page(current_user_id, rates):
             if rates.get("tariff_start_date"):
                 default_tariff_start = pd.to_datetime(rates.get("tariff_start_date")).date()
                 
-            tariff_start_val = st.date_input("Tarifstartdatum (Beginn des Liefervertrags)", default_tariff_start)
+            tariff_start_val = st.date_input(t("profile_tariff_start_date"), default_tariff_start)
             
         st.markdown("---")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("⚡ Electricity Settings")
+            st.subheader(t("profile_elec_header"))
             elec_rate = st.number_input(
-                "Electricity Tariff (€ / kWh)", 
+                t("profile_elec_tariff"), 
                 value=float(rates.get("electricity_kwh", 0.282)), 
                 step=0.001, 
                 format="%.4f"
             )
             elec_base = st.number_input(
-                "Electricity Base Price (€ / month)", 
+                t("profile_elec_base_price"), 
                 value=float(rates.get("electricity_base", 16.80)), 
                 step=0.10, 
                 format="%.2f"
             )
             elec_prep = st.number_input(
-                "Monthly Electricity Prepayment (€ / month)",
+                t("profile_elec_prepayment"),
                 value=float(rates.get("electricity_prepayment", 0.0)),
                 step=1.00,
                 format="%.2f"
             )
             
         with col2:
-            st.subheader("🔥 District Heating / Hot Water")
+            st.subheader(t("profile_hw_header"))
             hw_rate = st.number_input(
-                "District Heating Tarif (€ / MWh)", 
+                t("profile_hw_tariff"), 
                 value=float(rates.get("hot_water_mwh", 95.00)), 
                 step=0.50, 
                 format="%.2f"
             )
             hw_prep = st.number_input(
-                "Monthly District Heating Prepayment (€ / month)",
+                t("profile_hw_prepayment"),
                 value=float(rates.get("hot_water_prepayment", 0.0)),
                 step=1.00,
                 format="%.2f"
             )
             
-            st.subheader("💧 Cold Water Settings")
+            st.subheader(t("profile_cw_header"))
             cw_rate = st.number_input(
-                "Cold Water + Sewage Tarif (€ / m³)", 
+                t("profile_cw_tariff"), 
                 value=float(rates.get("cold_water_m3", 4.50)), 
                 step=0.10, 
                 format="%.2f"
             )
             cw_prep = st.number_input(
-                "Monthly Cold Water Prepayment (€ / month)",
+                t("profile_cw_prepayment"),
                 value=float(rates.get("cold_water_prepayment", 0.0)),
                 step=1.00,
                 format="%.2f"
             )
             
-        saved = st.form_submit_button("Update Profile & Tariffs")
+        saved = st.form_submit_button(t("profile_submit_btn"))
         
         if saved:
             new_rates = {
@@ -122,26 +123,26 @@ def render_page(current_user_id, rates):
             st.session_state.pop("processed_logs", None)
             st.session_state.pop("stats", None)
             
-            st.success("Profile and tariffs successfully updated.")
+            st.success(t("profile_success_msg"))
             st.rerun()
 
     st.markdown("---")
-    st.subheader("🔑 Change Password")
-    st.write("If you logged in via a password reset link, you can set your new password here:")
+    st.subheader(t("profile_password_header"))
+    st.write(t("profile_password_subtitle"))
     
     with st.form("change_password_form"):
-        new_password = st.text_input("New Password", type="password")
-        confirm_password = st.text_input("Confirm New Password", type="password")
-        password_submitted = st.form_submit_button("Update Password")
+        new_password = st.text_input(t("profile_password_new"), type="password")
+        confirm_password = st.text_input(t("profile_password_confirm"), type="password")
+        password_submitted = st.form_submit_button(t("profile_password_submit_btn"))
         
         if password_submitted:
             if not new_password or not confirm_password:
-                st.error("Password fields cannot be empty.")
+                st.error(t("profile_password_empty_err"))
             elif new_password != confirm_password:
-                st.error("Passwords do not match.")
+                st.error(t("profile_password_match_err"))
             else:
                 try:
                     auth.supabase.auth.update_user({"password": new_password})
-                    st.success("Your password has been successfully updated.")
+                    st.success(t("profile_password_success"))
                 except Exception as e:
-                    st.error(f"Failed to update password: {e}")
+                    st.error(f"{t('profile_password_fail')} {e}")

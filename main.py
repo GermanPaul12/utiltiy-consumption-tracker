@@ -10,6 +10,7 @@ from utils import database as db
 from utils import auth
 from utils import metrics
 from utils import styles
+from utils.i18n import t  # Import des Übersetzungsmoduls
 
 # 3. Import your UI Page Renderers
 from ui import ui_dashboard
@@ -137,27 +138,74 @@ print(f"\n--- DEBUG: Current Logged-In User UUID: {current_user_id} ---\n", flus
 # --- SIDEBAR CONFIGURATION (MODERNISIERTE BOOTSTRAP SIDEBAR) ---
 from streamlit_option_menu import option_menu
 
+# NEU: Standardmäßig auf ENGLISCH ("EN") setzen
+if "language" not in st.session_state:
+    st.session_state.language = "EN"
+
 with st.sidebar:
     st.write(f"⚡ **Utility Tracker**")
-    st.caption(f"Logged in as: **{current_username}**")
+    
+    # Horizontale Flaggen-Auswahl (Default startet jetzt bei English)
+    selected_lang = option_menu(
+        menu_title=None,
+        options=["🇩🇪 Deutsch", "🇬🇧 English"],
+        icons=None,
+        orientation="horizontal",
+        default_index=1 if st.session_state.language == "EN" else 0,
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent"},
+            "nav-link": {
+                "font-size": "12.5px", 
+                "text-align": "center", 
+                "margin": "2px", 
+                "padding": "6px",
+                "--hover-color": "#1e293b"
+            },
+            "nav-link-selected": {"background-color": "#0284c7", "font-weight": "600"},
+        }
+    )
+    
+    # Sprache bei Änderung aktualisieren und Seite neu laden
+    new_lang = "DE" if "Deutsch" in selected_lang else "EN"
+    if new_lang != st.session_state.language:
+        st.session_state.language = new_lang
+        st.rerun()
+
+    st.caption(f"{t('logged_in_as')} **{current_username}**")
     st.markdown("---")
     
+    # Interne, sprachneutrale Menüschlüssel
+    menu_items = [
+        "Dashboard Overview", 
+        "Log Consumption", 
+        "Device Analysis", 
+        "Manage Custom Devices",
+        "Profile & Tariff Settings", 
+        "Manage History"
+    ]
+    
+    # Direkte, fehlerfreie Übersetzungsschlüssel-Map
+    translation_key_map = {
+        "Dashboard Overview": "nav_dashboard",
+        "Log Consumption": "nav_log",
+        "Device Analysis": "nav_analysis",
+        "Manage Custom Devices": "nav_manage_devices",
+        "Profile & Tariff Settings": "nav_profile",
+        "Manage History": "nav_history"
+    }
+    
+    # Übersetzte Bezeichnungen erzeugen
+    translated_options = [t(translation_key_map[item]) for item in menu_items]
+    
     # Vertikales Navigationsmenü mit modernen Icons
-    page = option_menu(
-        menu_title="Navigation",  # Titel des Menüs
-        options=[
-            "Dashboard Overview", 
-            "Log Consumption", 
-            "Device Analysis", 
-            "Manage Custom Devices",
-            "Profile & Tariff Settings", 
-            "Manage History"
-        ],
+    selected_page_translated = option_menu(
+        menu_title=t("navigation_title"),  # Dynamischer Titel des Menüs
+        options=translated_options,
         icons=[
             "speedometer2",      # Dashboard
             "pencil-square",     # Loggen
             "cpu-fill",          # Geräte-Analyse
-            "plug-fill",         # NEU: Geräte verwalten
+            "plug-fill",         # Geräte verwalten
             "sliders",           # Tarife & Profile
             "clock-history"      # Verlauf
         ],
@@ -176,11 +224,15 @@ with st.sidebar:
         }
     )
     
+    # Übersetztes Menü-Ereignis wieder in die interne englische Seiten-ID mappen
+    selected_index = translated_options.index(selected_page_translated)
+    page = menu_items[selected_index]
+    
     st.markdown("---")
     
     # Theme-Wahl
     st.session_state.theme_preference = st.selectbox(
-        "Choose Theme Style",
+        t("theme_title"),
         ["🌙 Dark Mode", "☀️ Light Mode"]
     )
     styles.inject_theme(st.session_state.theme_preference)
@@ -188,14 +240,14 @@ with st.sidebar:
 
     # Status-Anzeige der DB
     if db.DATABASE_URL:
-        st.success("☁️ CONNECTED TO CLOUD DB")
+        st.success(t("cloud_db_connected"))
     else:
-        st.warning("🔌 RUNNING LOCALLY (SQLITE)")
+        st.warning(t("local_db_connected"))
         
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Logout-Button am Ende der Sidebar
-    if st.button("Logout", width="stretch", type="secondary"):
+    if st.button(t("logout_btn"), width="stretch", type="secondary"):
         try:
             cookie_controller.remove("supabase_session")
             auth.supabase.auth.sign_out()
