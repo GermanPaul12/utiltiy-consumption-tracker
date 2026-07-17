@@ -1,5 +1,4 @@
 # main.py
-import datetime
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -20,9 +19,6 @@ from ui import ui_profile
 from ui import ui_profile_devices
 from ui import ui_manage_history
 from ui import ui_devices
-
-# Cookie-Controller für persistentes Login
-from streamlit_cookies_controller import CookieController
 
 # Set Page Config
 st.set_page_config(
@@ -50,71 +46,24 @@ if "theme_preference" not in st.session_state:
 
 styles.inject_theme(st.session_state.theme_preference)
 
-# --- COOKIE-BASED SESSION RESTORATION (SAFE WRAPPERS) ---
-cookie_controller = CookieController()
-
-# Absolut absturzsichere Wrapper-Funktionen zur Umgehung des internen Bugs im Cookie-Paket
-def safe_set_cookie(name, value, expires=None):
-    try:
-        # Falls die interne Struktur des Pakets noch nicht initialisiert wurde (None ist),
-        # weisen wir ihr über Name-Mangling ein leeres Dictionary zu, um den TypeError zu verhindern.
-        if hasattr(cookie_controller, "_CookieController__cookies") and getattr(cookie_controller, "_CookieController__cookies") is None:
-            setattr(cookie_controller, "_CookieController__cookies", {})
-        cookie_controller.set(name, value, expires=expires)
-    except Exception:
-        pass
-
-def safe_get_cookie(name):
-    try:
-        return cookie_controller.get(name)
-    except Exception:
-        return None
-
-def safe_remove_cookie(name):
-    try:
-        # Sicherheitsprüfung auch beim Löschen
-        if hasattr(cookie_controller, "_CookieController__cookies") and getattr(cookie_controller, "_CookieController__cookies") is None:
-            setattr(cookie_controller, "_CookieController__cookies", {})
-        cookie_controller.remove(name)
-    except Exception:
-        pass
-
-
-# UX-UPGRADE: Zwingt Streamlit zu exakt einem Rerun beim Start,
-# damit der Cookie-Controller Zeit hat, die Browser-Cookies asynchron zu laden.
-if "cookies_retrieved" not in st.session_state:
-    st.session_state.cookies_retrieved = False
-
-if not st.session_state.cookies_retrieved:
-    st.session_state.cookies_retrieved = True
-    st.rerun()
-
+# --- NATIVE, BROWSERUNABHÄNGIGE SESSION-RESTURIERUNG ÜBER URL ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# Auto-Login-Versuch ausführen, falls kein User in der Session ist
-if st.session_state.user is None:
-    try:
-        saved_session = safe_get_cookie("supabase_session")
-        if saved_session and isinstance(saved_session, dict):
-            # Session in Supabase wiederherstellen (erneuert abgelaufene Tokens automatisch im Hintergrund)
-            res = auth.supabase.auth.set_session(
-                saved_session["access_token"], 
-                saved_session["refresh_token"]
-            )
-            if res.user and res.session:
-                st.session_state.user = {
-                    "id": res.user.id,
-                    "email": res.user.email
-                }
-                # AUTO-REFRESH: Schreibt die neuen, frischen Tokens für weitere 30 Tage ins Cookie
-                expires_date = datetime.datetime.now() + datetime.timedelta(days=30)
-                safe_set_cookie("supabase_session", {
-                    "access_token": res.session.access_token,
-                    "refresh_token": res.session.refresh_token
-                }, expires=expires_date)
-    except Exception:
-        pass # Ignoriere Fehler bei fehlenden/ungültigen Cookies
+# Prüfe, ob eine aktive Sitzung in der URL hinterlegt ist
+url_session_id = st.query_params.get("session")
+
+if st.session_state.user is None and url_session_id:
+    # Abgleich der Sitzungs-ID mit der Supabase-Datenbank
+    valid_session = db.validate_user_session(url_session_id)
+    if valid_session:
+        st.session_state.user = {
+            "id": valid_session["id"],
+            "email": valid_session["email"]
+        }
+    else:
+        # Falls die Session abgelaufen oder ungültig ist, säubere die URL
+        st.query_params.pop("session", None)
 
 # --- AUTH PORTAL ---
 if st.session_state.user is None:
@@ -161,14 +110,11 @@ if st.session_state.user is None:
                                 "id": user_data["id"],
                                 "email": user_data["email"]
                             }
-                            expires_date = datetime.datetime.now() + datetime.timedelta(days=30)
+                            # NEU: Generiere eine sichere Sitzungs-ID und speichere sie in der DB
+                            new_session_id = db.create_user_session(user_data["id"], user_data["email"])
                             
-                            # Session dauerhaft im Browser-Cookie sichern (Gültigkeit: 30 Tage)
-                            safe_set_cookie("supabase_session", {
-                                "access_token": user_data["access_token"],
-                                "refresh_token": user_data["refresh_token"]
-                            }, expires=expires_date)
-                            
+                            # Hänge den sicheren Token an die Browser-URL an
+                            st.query_params["session"] = new_session_id
                             st.rerun()
                         else:
                             st.error("Invalid email or password.")
@@ -184,14 +130,14 @@ print(f"\n--- DEBUG: Current Logged-In User UUID: {current_user_id} ---\n", flus
 # --- SIDEBAR CONFIGURATION (MODERNISIERTE BOOTSTRAP SIDEBAR) ---
 from streamlit_option_menu import option_menu
 
-# NEU: Standardmäßig auf ENGLISCH ("EN") setzen
+# Standardmäßig auf ENGLISCH ("EN") setzen
 if "language" not in st.session_state:
     st.session_state.language = "EN"
 
 with st.sidebar:
     st.write(f"⚡ **Utility Tracker**")
     
-    # Horizontale Flaggen-Auswahl (Default startet jetzt bei English)
+    # Horizontale Flaggen-Auswahl
     selected_lang = option_menu(
         menu_title=None,
         options=["🇩🇪 Deutsch", "🇬🇧 English"],
@@ -245,7 +191,7 @@ with st.sidebar:
     
     # Vertikales Navigationsmenü mit modernen Icons
     selected_page_translated = option_menu(
-        menu_title=t("navigation_title"),  # Dynamischer Titel des Menüs
+        menu_title=t("navigation_title"),
         options=translated_options,
         icons=[
             "speedometer2",      # Dashboard
@@ -292,10 +238,13 @@ with st.sidebar:
         
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Logout-Button am Ende der Sidebar
+    # Logout-Button am Ende der Sidebar (Löscht die Session aus der DB und der URL)
     if st.button(t("logout_btn"), width="stretch", type="secondary"):
         try:
-            safe_remove_cookie("supabase_session")
+            active_session = st.query_params.get("session")
+            if active_session:
+                db.delete_user_session(active_session)
+            st.query_params.pop("session", None)
             auth.supabase.auth.sign_out()
         except Exception:
             pass

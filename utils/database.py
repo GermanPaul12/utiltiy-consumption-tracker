@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
+import uuid
+import datetime
 
 load_dotenv()
 # 1. Establish Database Connection Engine with Auto-Cleanup & SSL Context
@@ -103,6 +105,24 @@ def initialize_database():
                 avg_yearly_consumption_kwh DOUBLE PRECISION DEFAULT 0.0,
                 avg_yearly_water_m3 DOUBLE PRECISION DEFAULT 0.0,
                 UNIQUE (user_id, device_name)
+            )
+        """)
+    if is_sqlite:
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id TEXT PRIMARY KEY, 
+                user_id TEXT, 
+                user_email TEXT, 
+                expires_at TEXT
+            )
+        """)
+    else:
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id UUID PRIMARY KEY, 
+                user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, 
+                user_email VARCHAR(255), 
+                expires_at TIMESTAMP WITH TIME ZONE
             )
         """)
 
@@ -234,3 +254,36 @@ def save_device(user_id, device_name, device_group, avg_yearly_kwh, avg_yearly_w
 
 def delete_device(user_id, device_id):
     execute_db("DELETE FROM devices WHERE user_id = :uid AND id = :did", {"uid": user_id, "did": int(device_id)})
+    
+
+def create_user_session(user_id, user_email):
+    # Generiert eine sichere, zufällige Sitzungs-ID (UUID)
+    session_id = str(uuid.uuid4())
+    # Gültigkeit: 30 Tage in der Zukunft
+    expires_at = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    
+    execute_db("""
+        INSERT INTO user_sessions (id, user_id, user_email, expires_at)
+        VALUES (:id, :uid, :email, :expires)
+    """, {"id": session_id, "uid": user_id, "email": user_email, "expires": expires_at})
+    
+    return session_id
+
+def validate_user_session(session_id):
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Prüft, ob die Sitzungs-ID existiert und noch nicht abgelaufen ist
+    df = run_query("""
+        SELECT user_id, user_email FROM user_sessions 
+        WHERE id = :id AND expires_at > :now
+    """, {"id": session_id, "now": now_str})
+    
+    if not df.empty:
+        return {
+            "id": str(df.iloc[0]["user_id"]),
+            "email": str(df.iloc[0]["user_email"])
+        }
+    return None
+
+def delete_user_session(session_id):
+    execute_db("DELETE FROM user_sessions WHERE id = :id", {"id": session_id})
