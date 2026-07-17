@@ -1,14 +1,14 @@
-# database.py
+# utils/database.py
 import os
 import ssl
+import datetime
+import uuid
 from dotenv import load_dotenv 
 import pandas as pd
-import streamlit as st
 from sqlalchemy import create_engine, text
-import uuid
-import datetime
 
 load_dotenv()
+
 # 1. Establish Database Connection Engine with Auto-Cleanup & SSL Context
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -55,25 +55,32 @@ def check_db_connection():
     except Exception as e:
         return False, str(e)
 
-# Database Schema Initialization & Safe Migration
+# Database Schema Initialization
 def initialize_database():
     is_sqlite = engine.dialect.name == 'sqlite'
     
     if is_sqlite:
         execute_db("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, date TEXT, meter TEXT, reading REAL)")
-        execute_db("CREATE TABLE IF NOT EXISTS rates (user_id TEXT PRIMARY KEY, electricity_kwh REAL, electricity_base REAL, hot_water_mwh REAL, cold_water_m3 REAL, electricity_prepayment REAL, hot_water_prepayment REAL, cold_water_prepayment REAL, household_size INTEGER DEFAULT 1, apartment_size REAL DEFAULT 50.0)")
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS rates (
+                user_id TEXT PRIMARY KEY, 
+                electricity_kwh REAL, 
+                electricity_base REAL, 
+                hot_water_mwh REAL, 
+                cold_water_m3 REAL, 
+                electricity_prepayment REAL, 
+                hot_water_prepayment REAL, 
+                cold_water_prepayment REAL, 
+                household_size INTEGER DEFAULT 1, 
+                apartment_size REAL DEFAULT 50.0,
+                move_in_date TEXT,
+                tariff_start_date TEXT
+            )
+        """)
         execute_db("""
             CREATE TABLE IF NOT EXISTS smart_device_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                user_id TEXT, 
-                date TEXT, 
-                device_name TEXT, 
-                ip TEXT, 
-                current_power_w REAL, 
-                today_energy_kwh REAL, 
-                month_energy_kwh REAL, 
-                today_runtime_min INTEGER, 
-                month_runtime_min INTEGER
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, date TEXT, device_name TEXT, ip TEXT, 
+                current_power_w REAL, today_energy_kwh REAL, month_energy_kwh REAL, today_runtime_min INTEGER, month_runtime_min INTEGER
             )
         """)
         execute_db("""
@@ -87,9 +94,32 @@ def initialize_database():
                 UNIQUE (user_id, device_name)
             )
         """)
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id TEXT PRIMARY KEY, 
+                user_id TEXT, 
+                user_email TEXT, 
+                expires_at TEXT
+            )
+        """)
     else:
         execute_db("CREATE TABLE IF NOT EXISTS logs (id SERIAL PRIMARY KEY, user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, date DATE, meter VARCHAR(100), reading DOUBLE PRECISION)")
-        execute_db("CREATE TABLE IF NOT EXISTS rates (user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE, electricity_kwh DOUBLE PRECISION, electricity_base DOUBLE PRECISION, hot_water_mwh DOUBLE PRECISION, cold_water_m3 DOUBLE PRECISION, electricity_prepayment DOUBLE PRECISION, hot_water_prepayment DOUBLE PRECISION, cold_water_prepayment DOUBLE PRECISION, household_size INTEGER DEFAULT 1, apartment_size DOUBLE PRECISION DEFAULT 50.0)")
+        execute_db("""
+            CREATE TABLE IF NOT EXISTS rates (
+                user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE, 
+                electricity_kwh DOUBLE PRECISION, 
+                electricity_base DOUBLE PRECISION, 
+                hot_water_mwh DOUBLE PRECISION, 
+                cold_water_m3 DOUBLE PRECISION, 
+                electricity_prepayment DOUBLE PRECISION, 
+                hot_water_prepayment DOUBLE PRECISION, 
+                cold_water_prepayment DOUBLE PRECISION, 
+                household_size INTEGER DEFAULT 1, 
+                apartment_size DOUBLE PRECISION DEFAULT 50.0,
+                move_in_date DATE,
+                tariff_start_date DATE
+            )
+        """)
         execute_db("""
             CREATE TABLE IF NOT EXISTS smart_device_logs (
                 id SERIAL PRIMARY KEY, user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, date DATE, device_name VARCHAR(100), ip VARCHAR(45), 
@@ -107,16 +137,6 @@ def initialize_database():
                 UNIQUE (user_id, device_name)
             )
         """)
-    if is_sqlite:
-        execute_db("""
-            CREATE TABLE IF NOT EXISTS user_sessions (
-                id TEXT PRIMARY KEY, 
-                user_id TEXT, 
-                user_email TEXT, 
-                expires_at TEXT
-            )
-        """)
-    else:
         execute_db("""
             CREATE TABLE IF NOT EXISTS user_sessions (
                 id UUID PRIMARY KEY, 
@@ -126,57 +146,25 @@ def initialize_database():
             )
         """)
 
-    # Sicherheits-Migrationen für bestehende Installationen
+    # Kompakte Abwärtskompatibilitäts-Sicherung für ältere Installationen
     try:
         if is_sqlite:
             execute_db("ALTER TABLE devices ADD COLUMN avg_yearly_water_m3 REAL DEFAULT 0.0")
-        else:
-            execute_db("ALTER TABLE devices ADD COLUMN avg_yearly_water_m3 DOUBLE PRECISION DEFAULT 0.0")
-    except Exception:
-        pass
-
-    try:
-        if is_sqlite:
             execute_db("ALTER TABLE devices ADD COLUMN device_group TEXT DEFAULT 'Sonstiges'")
-        else:
-            execute_db("ALTER TABLE devices ADD COLUMN device_group VARCHAR(100) DEFAULT 'Sonstiges'")
-    except Exception:
-        pass
-
-    try:
-        df_rates_check = run_query("SELECT * FROM rates LIMIT 1")
-        if not df_rates_check.empty and "user_id" not in df_rates_check.columns:
-            with engine.begin() as conn:
-                conn.execute(text("DROP TABLE rates"))
-    except Exception:
-        pass
-    try:
-        if is_sqlite:
             execute_db("ALTER TABLE rates ADD COLUMN move_in_date TEXT")
             execute_db("ALTER TABLE rates ADD COLUMN tariff_start_date TEXT")
         else:
+            execute_db("ALTER TABLE devices ADD COLUMN avg_yearly_water_m3 DOUBLE PRECISION DEFAULT 0.0")
+            execute_db("ALTER TABLE devices ADD COLUMN device_group VARCHAR(100) DEFAULT 'Sonstiges'")
             execute_db("ALTER TABLE rates ADD COLUMN move_in_date DATE")
             execute_db("ALTER TABLE rates ADD COLUMN tariff_start_date DATE")
     except Exception:
         pass # Spalten existieren bereits
 
-    df_rates_check = run_query("SELECT * FROM rates LIMIT 1")
-    if "household_size" not in df_rates_check.columns:
-        with engine.begin() as conn:
-            if is_sqlite:
-                conn.execute(text("ALTER TABLE rates ADD COLUMN household_size INTEGER DEFAULT 1"))
-                conn.execute(text("ALTER TABLE rates ADD COLUMN apartment_size REAL DEFAULT 50.0"))
-            else:
-                conn.execute(text("ALTER TABLE rates ADD COLUMN household_size INTEGER DEFAULT 1"))
-                conn.execute(text("ALTER TABLE rates ADD COLUMN apartment_size DOUBLE PRECISION DEFAULT 50.0"))
-
 # User-Scoped Data Helpers
-# utils/database.py
-
 def load_rates(user_id):
     df = run_query("SELECT * FROM rates WHERE user_id = :uid", {"uid": user_id})
     if df.empty:
-        # Erstellt Default-Werte inklusive dem heutigen Datum als Einzug/Tarifstart
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         execute_db(f"""
             INSERT INTO rates (user_id, electricity_kwh, electricity_base, hot_water_mwh, cold_water_m3, 
@@ -230,7 +218,7 @@ def load_smart_device_logs(user_id):
         df['date'] = pd.to_datetime(df['date']).dt.date
     return df
 
-# Hilfsfunktionen für das Speichern und Löschen statischer Benchmarks
+# Custom Device Helpers
 def load_devices(user_id):
     return run_query("SELECT * FROM devices WHERE user_id = :uid ORDER BY device_name ASC", {"uid": user_id})
 
@@ -254,12 +242,10 @@ def save_device(user_id, device_name, device_group, avg_yearly_kwh, avg_yearly_w
 
 def delete_device(user_id, device_id):
     execute_db("DELETE FROM devices WHERE user_id = :uid AND id = :did", {"uid": user_id, "did": int(device_id)})
-    
 
+# Session Helpers
 def create_user_session(user_id, user_email):
-    # Generiert eine sichere, zufällige Sitzungs-ID (UUID)
     session_id = str(uuid.uuid4())
-    # Gültigkeit: 30 Tage in der Zukunft
     expires_at = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     
     execute_db("""
@@ -271,8 +257,6 @@ def create_user_session(user_id, user_email):
 
 def validate_user_session(session_id):
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Prüft, ob die Sitzungs-ID existiert und noch nicht abgelaufen ist
     df = run_query("""
         SELECT user_id, user_email FROM user_sessions 
         WHERE id = :id AND expires_at > :now
