@@ -12,5 +12,6 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "streamlit>=1.58.0",
     "streamlit-cookies-controller>=0.0.4",
+    "streamlit-option-menu>=0.4.0",
     "supabase>=2.31.0",
 ]

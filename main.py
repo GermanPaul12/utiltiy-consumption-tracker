@@ -15,6 +15,7 @@ from utils import styles
 from ui import ui_dashboard
 from ui import ui_log_consumption
 from ui import ui_profile
+from ui import ui_profile_devices
 from ui import ui_manage_history
 from ui import ui_devices
 
@@ -133,38 +134,78 @@ current_username = st.session_state.user["email"]
 # Print the UUID to your terminal console for debugging (Console Only)
 print(f"\n--- DEBUG: Current Logged-In User UUID: {current_user_id} ---\n", flush=True)
 
-# --- SIDEBAR CONFIGURATION ---
-st.sidebar.title("Utility Tracker")
-st.sidebar.write(f"Logged in as: **{current_username}**")
+# --- SIDEBAR CONFIGURATION (MODERNISIERTE BOOTSTRAP SIDEBAR) ---
+from streamlit_option_menu import option_menu
 
-st.session_state.theme_preference = st.sidebar.selectbox(
-    "Choose Theme Style",
-    ["🌙 Dark Mode", "☀️ Light Mode"]
-)
+with st.sidebar:
+    st.write(f"⚡ **Utility Tracker**")
+    st.caption(f"Logged in as: **{current_username}**")
+    st.markdown("---")
+    
+    # Vertikales Navigationsmenü mit modernen Icons
+    page = option_menu(
+        menu_title="Navigation",  # Titel des Menüs
+        options=[
+            "Dashboard Overview", 
+            "Log Consumption", 
+            "Device Analysis", 
+            "Manage Custom Devices",
+            "Profile & Tariff Settings", 
+            "Manage History"
+        ],
+        icons=[
+            "speedometer2",      # Dashboard
+            "pencil-square",     # Loggen
+            "cpu-fill",          # Geräte-Analyse
+            "plug-fill",         # NEU: Geräte verwalten
+            "sliders",           # Tarife & Profile
+            "clock-history"      # Verlauf
+        ],
+        menu_icon="compass",
+        default_index=0,
+        styles={
+            "container": {"padding": "5px!important", "background-color": "transparent"},
+            "icon": {"color": "#38bdf8", "font-size": "15px"},
+            "nav-link": {
+                "font-size": "13.5px", 
+                "text-align": "left", 
+                "margin": "0px", 
+                "--hover-color": "#1e293b"
+            },
+            "nav-link-selected": {"background-color": "#0284c7", "font-weight": "600"},
+        }
+    )
+    
+    st.markdown("---")
+    
+    # Theme-Wahl
+    st.session_state.theme_preference = st.selectbox(
+        "Choose Theme Style",
+        ["🌙 Dark Mode", "☀️ Light Mode"]
+    )
+    styles.inject_theme(st.session_state.theme_preference)
+    plotly_template = "plotly_dark" if st.session_state.theme_preference == "🌙 Dark Mode" else "plotly_white"
 
-styles.inject_theme(st.session_state.theme_preference)
-plotly_template = "plotly_dark" if st.session_state.theme_preference == "🌙 Dark Mode" else "plotly_white"
-
-if st.sidebar.button("Logout"):
-    # Cookies und Session State beim Logout leeren
-    try:
-        cookie_controller.remove("supabase_session")
-        auth.supabase.auth.sign_out()
-    except Exception:
-        pass
-    st.session_state.user = None
-    st.rerun()
+    # Status-Anzeige der DB
+    if db.DATABASE_URL:
+        st.success("☁️ CONNECTED TO CLOUD DB")
+    else:
+        st.warning("🔌 RUNNING LOCALLY (SQLITE)")
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Logout-Button am Ende der Sidebar
+    if st.button("Logout", width="stretch", type="secondary"):
+        try:
+            cookie_controller.remove("supabase_session")
+            auth.supabase.auth.sign_out()
+        except Exception:
+            pass
+        st.session_state.user = None
+        st.rerun()
 
 st.sidebar.caption("Mannheim (68163) Tariffs")
-if db.DATABASE_URL:
-    st.sidebar.success("CONNECTED TO CLOUD DB")
-else:
-    st.sidebar.warning("RUNNING LOCALLY (SQLITE)")
 
-page = st.sidebar.radio(
-    "Go to",
-    ["Dashboard Overview", "Log Consumption", "Device Analysis", "Profile & Tariff Settings", "Manage History"]
-)
 
 # --- ZENTRALISIERTES CACHING ÜBER SESSION STATE ---
 if "rates" not in st.session_state:
@@ -202,6 +243,9 @@ elif page == "Log Consumption":
 
 elif page == "Device Analysis":
     ui_devices.render_page(current_user_id, stats, rates)
+    
+elif page == "Manage Custom Devices": 
+    ui_profile_devices.render_page(current_user_id)
 
 elif page == "Profile & Tariff Settings":
     ui_profile.render_page(current_user_id, rates)

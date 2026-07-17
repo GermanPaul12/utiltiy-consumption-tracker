@@ -2,6 +2,8 @@
 import datetime
 import pandas as pd
 
+# utils/metrics.py (Berechnungen filtern)
+
 def calculate_metrics(logs_df, rates):
     if logs_df.empty:
         return pd.DataFrame(), {}
@@ -12,11 +14,31 @@ def calculate_metrics(logs_df, rates):
         "Cold Water (m³)": {"rate_key": "cold_water_m3", "prep_key": "cold_water_prepayment", "co2_factor": 0.35, "unit": "m³"}
     }
     
+    # NEU: Das jüngste (späteste) Datum aus Einzug & Tarifstart bestimmen
+    effective_start_date = None
+    move_in = rates.get("move_in_date")
+    tariff_start = rates.get("tariff_start_date")
+    
+    if move_in and tariff_start:
+        # Ermittelt den mathematisch spätesten (jüngsten) Startpunkt
+        effective_start_date = max(pd.to_datetime(move_in).date(), pd.to_datetime(tariff_start).date())
+
     processed_dfs = []
     summary_stats = {}
     
     for meter_name, meta in meters_meta.items():
         meter_df = logs_df[logs_df['meter'] == meter_name].copy()
+        if meter_df.empty:
+            continue
+            
+        meter_df = meter_df.sort_values(by='date')
+        
+        # NEU: Filtere alle Einträge heraus, die VOR dem jüngsten Startdatum lagen
+        if effective_start_date is not None:
+            # Stellt sicher, dass das Datumsformat der Zählerstände übereinstimmt
+            meter_df['date'] = pd.to_datetime(meter_df['date']).dt.date
+            meter_df = meter_df[meter_df['date'] >= effective_start_date].copy()
+            
         if meter_df.empty:
             continue
             

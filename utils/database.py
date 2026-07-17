@@ -130,6 +130,15 @@ def initialize_database():
                 conn.execute(text("DROP TABLE rates"))
     except Exception:
         pass
+    try:
+        if is_sqlite:
+            execute_db("ALTER TABLE rates ADD COLUMN move_in_date TEXT")
+            execute_db("ALTER TABLE rates ADD COLUMN tariff_start_date TEXT")
+        else:
+            execute_db("ALTER TABLE rates ADD COLUMN move_in_date DATE")
+            execute_db("ALTER TABLE rates ADD COLUMN tariff_start_date DATE")
+    except Exception:
+        pass # Spalten existieren bereits
 
     df_rates_check = run_query("SELECT * FROM rates LIMIT 1")
     if "household_size" not in df_rates_check.columns:
@@ -142,14 +151,18 @@ def initialize_database():
                 conn.execute(text("ALTER TABLE rates ADD COLUMN apartment_size DOUBLE PRECISION DEFAULT 50.0"))
 
 # User-Scoped Data Helpers
+# utils/database.py
+
 def load_rates(user_id):
     df = run_query("SELECT * FROM rates WHERE user_id = :uid", {"uid": user_id})
     if df.empty:
-        execute_db("""
+        # Erstellt Default-Werte inklusive dem heutigen Datum als Einzug/Tarifstart
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        execute_db(f"""
             INSERT INTO rates (user_id, electricity_kwh, electricity_base, hot_water_mwh, cold_water_m3, 
                                electricity_prepayment, hot_water_prepayment, cold_water_prepayment,
-                               household_size, apartment_size)
-            VALUES (:uid, 0.282, 16.80, 95.00, 4.50, 0.0, 0.0, 0.0, 1, 50.0)
+                               household_size, apartment_size, move_in_date, tariff_start_date)
+            VALUES (:uid, 0.282, 16.80, 95.00, 4.50, 0.0, 0.0, 0.0, 1, 50.0, '{today_str}', '{today_str}')
             ON CONFLICT (user_id) DO NOTHING
         """, {"uid": user_id})
         df = run_query("SELECT * FROM rates WHERE user_id = :uid", {"uid": user_id})
@@ -166,7 +179,9 @@ def save_rates(user_id, rates_dict):
             hot_water_prepayment = :hw_prep,
             cold_water_prepayment = :cw_prep,
             household_size = :house_size,
-            apartment_size = :apt_size
+            apartment_size = :apt_size,
+            move_in_date = :move_in,
+            tariff_start_date = :tariff_start
         WHERE user_id = :uid
     """, params={
         "uid": user_id,
@@ -178,7 +193,9 @@ def save_rates(user_id, rates_dict):
         "hw_prep": rates_dict["hot_water_prepayment"],
         "cw_prep": rates_dict["cold_water_prepayment"],
         "house_size": int(rates_dict["household_size"]),
-        "apt_size": float(rates_dict["apartment_size"])
+        "apt_size": float(rates_dict["apartment_size"]),
+        "move_in": rates_dict["move_in_date"],
+        "tariff_start": rates_dict["tariff_start_date"]
     })
 
 def load_logs(user_id):
