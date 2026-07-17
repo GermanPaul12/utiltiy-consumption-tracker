@@ -88,7 +88,7 @@ def render_page(current_user_id, stats, rates):
         )
 
     # ---------------------------------------------------------
-    # ERKLÄRBARKEITS-CHECK (STROM)
+    # ERKLÄRBARKEITS-CHECK (STROM MIT INTERAKTIVEM 2% GRUPPIERUNGSFILTER)
     # ---------------------------------------------------------
     st.markdown("---")
     st.header(t("dev_elec_explain_header"))
@@ -132,19 +132,83 @@ def render_page(current_user_id, stats, rates):
         else:
             st.success(t("dev_elec_explain_fully_covered"))
             
-        # Pie-Chart
-        elec_data = [{"Sektor": r["device_name"], "Verbrauch (kWh)": r["avg_yearly_consumption_kwh"]} for _, r in df_devices_calc.iterrows() if r["avg_yearly_consumption_kwh"] > 0]
-        if elec_unbekannt > 0:
-            elec_data.append({"Sektor": t("dev_label_unbekannt_elec"), "Verbrauch (kWh)": elec_unbekannt})
+        # ---------------------------------------------------------
+        # MATHEMATISCHE GRUPPIERUNG: GERÄTE UNTER 2% ZUSAMMENFASSEN
+        # ---------------------------------------------------------
+        threshold_2_percent = actual_annual_elec * 0.02
         
+        main_elec_list = []
+        small_elec_list = []
+        
+        # Aufteilung der Geräte in Hauptgeräte und Kleingeräte (< 2%)
+        for _, r in df_devices_calc.iterrows():
+            kwh = r["avg_yearly_consumption_kwh"]
+            if kwh > 0:
+                share_pct = (kwh / actual_annual_elec) * 100
+                device_info = {
+                    "device_name": r["device_name"],
+                    "kwh": kwh,
+                    "pct": share_pct
+                }
+                if kwh < threshold_2_percent:
+                    small_elec_list.append(device_info)
+                else:
+                    main_elec_list.append(device_info)
+                    
+        # Daten-Liste für Pie-Chart initialisieren
+        elec_data = []
+        
+        # 1. Hauptgeräte hinzufügen (haben Standard-Hoverinfo)
+        for item in main_elec_list:
+            elec_data.append({
+                "Sektor": item["device_name"], 
+                "Verbrauch (kWh)": item["kwh"],
+                "Hoverinfo": ""
+            })
+            
+        # 2. Kleingeräte aggregieren und formatierten Tooltip-Text erstellen
+        if small_elec_list:
+            small_sum_kwh = sum(x["kwh"] for x in small_elec_list)
+            
+            # HTML-Formatierter Tooltip für die Plotly-Legendeneinblendung
+            hover_text_lines = [
+                f"• {x['device_name']}: {x['pct']:.1f}% ({x['kwh']:.1f} kWh)" 
+                for x in small_elec_list
+            ]
+            hover_details = "<br>".join(hover_text_lines)
+            
+            elec_data.append({
+                "Sektor": t("dev_label_other_small_devices"), 
+                "Verbrauch (kWh)": small_sum_kwh,
+                "Hoverinfo": hover_details
+            })
+            
+        # 3. Unbekannten Rest hinzufügen
+        if elec_unbekannt > 0:
+            elec_data.append({
+                "Sektor": t("dev_label_unbekannt_elec"), 
+                "Verbrauch (kWh)": elec_unbekannt,
+                "Hoverinfo": ""
+            })
+        
+        df_elec_pie = pd.DataFrame(elec_data)
+        
+        # Interaktives Pie-Chart rendern
         fig_elec_share = px.pie(
-            pd.DataFrame(elec_data),
+            df_elec_pie,
             values="Verbrauch (kWh)",
             names="Sektor",
             title=t("dev_elec_pie_title"),
             template="plotly_dark",
-            hole=0.4
+            hole=0.4,
+            custom_data=["Hoverinfo"] # Übergibt Tooltip-Informationen an Plotly
         )
+        
+        # Definiert das Hover-Verhalten: Zeigt bei den Kleingeräten die Liste an
+        fig_elec_share.update_traces(
+            hovertemplate="<b>%{label}</b><br>%{value:.1f} kWh (%{percent})<br>%{customdata[0]}<extra></extra>"
+        )
+        
         st.plotly_chart(fig_elec_share, width="stretch")
     else:
         st.info(t("dev_elec_insufficient_data"))
@@ -187,7 +251,7 @@ def render_page(current_user_id, stats, rates):
                 t("dev_water_explain_analysis_text").format(
                     pct=explain_pct_water,
                     rem_pct=100.0 - explain_pct_water,
-                    unexplained_val=water_unbekannt,
+                    unexplained_liters=water_unbekannt * 1000, # Mathematische Berechnung vorab gelöst!
                     unexplained_cost=water_unbekannt * water_tariff
                 )
             )

@@ -2,47 +2,55 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 
 def render(processed_logs, color_map, plotly_template):
-    st.subheader("📈 Cross-Utility Normalization & Log Analysis")
-    st.write(
-        "Comparing utilities with vastly different scales (e.g., Megawatt hours of heating vs. Liters of water) "
-        "is challenging. Below are two normalized, scale-free comparisons designed to balance these differences:"
-    )
+    st.subheader(t("cu_header"))
+    st.write(t("cu_subtitle"))
     
     active_intervals = processed_logs[processed_logs['days_elapsed'] > 0].copy()
     
+    # Zuordnungstabelle der Übersetzungsschlüssel für die Legenden
+    option_key_map = {
+        "Electricity (kWh)": "log_option_elec",
+        "Hot Water (MWh)": "log_option_hw",
+        "Cold Water (m³)": "log_option_cw"
+    }
+
     if len(active_intervals['meter'].unique()) > 1:
+        # Dynamische Übersetzung der Legenden-Namen im verarbeiteten DataFrame
+        active_intervals["translated_meter"] = active_intervals["meter"].apply(lambda m: t(option_key_map.get(m, m)))
+        
+        # Generiert ein übersetztes Color-Mapping für Plotly
+        translated_color_map = {t(option_key_map.get(k, k)): v for k, v in color_map.items()}
+
         col_norm1, col_norm2 = st.columns(2)
         
         with col_norm1:
-            st.markdown("#### 💵 Logarithmic Daily Financial Burn Rate (€ / Day)")
-            st.caption(
-                "By converting physical units into daily financial costs (€/day), we establish a common scale. "
-                "A **Logarithmic Y-Axis** ensures that small water costs (e.g., €0.20/day) remain visible alongside "
-                "large electricity or heating spikes (e.g., €15.00/day)."
-            )
+            st.markdown(t("cu_burn_header"))
+            st.caption(t("cu_burn_desc"))
             
             fig_log_burn = px.line(
                 active_intervals,
                 x='date',
                 y='daily_cost_rate',
-                color='meter',
+                color='translated_meter',
                 markers=True,
-                title="Daily Burn Rate (€ / Day) - Logarithmic Scale",
-                labels={"daily_cost_rate": "Burn Rate (€ / Day)", "date": "Reading Date", "meter": "Utility"},
+                title=t("cu_burn_title"),
+                labels={
+                    "daily_cost_rate": t("cu_burn_y_label"), 
+                    "date": t("cu_label_date"), 
+                    "translated_meter": t("cu_label_utility")
+                },
                 template=plotly_template,
-                color_discrete_map=color_map
+                color_discrete_map=translated_color_map
             )
             fig_log_burn.update_yaxes(type="log")
             st.plotly_chart(fig_log_burn, width="stretch")
             
         with col_norm2:
-            st.markdown("#### 📊 Unit-Free Relative Fluctuations (% of baseline)")
-            st.caption(
-                "This chart normalizes all physical consumption units by expressing them as a percentage "
-                "of your utility-specific average. This isolates behavioral changes from the scale of the unit."
-            )
+            st.markdown(t("cu_fluct_header"))
+            st.caption(t("cu_fluct_desc"))
             
             normalized_list = []
             for meter_name in active_intervals['meter'].unique():
@@ -54,23 +62,33 @@ def render(processed_logs, color_map, plotly_template):
             
             if normalized_list:
                 df_normalized = pd.concat(normalized_list).sort_values(by='date')
+                df_normalized["translated_meter"] = df_normalized["meter"].apply(lambda m: t(option_key_map.get(m, m)))
                 
                 fig_norm_fluct = px.line(
                     df_normalized,
                     x='date',
                     y='percent_of_baseline',
-                    color='meter',
+                    color='translated_meter',
                     markers=True,
-                    title="Usage Fluctuations relative to Personal Baseline (Average = 100%)",
-                    labels={"percent_of_baseline": "Relative Usage (% of Personal Average)", "date": "Reading Date"},
+                    title=t("cu_fluct_title"),
+                    labels={
+                        "percent_of_baseline": t("cu_fluct_y_label"), 
+                        "date": t("cu_label_date"),
+                        "translated_meter": t("cu_label_utility")
+                    },
                     template=plotly_template,
-                    color_discrete_map=color_map
+                    color_discrete_map=translated_color_map
                 )
-                fig_norm_fluct.add_hline(y=100.0, line_dash="dash", line_color="#64748b", annotation_text="Your Baseline (100%)")
+                fig_norm_fluct.add_hline(
+                    y=100.0, 
+                    line_dash="dash", 
+                    line_color="#64748b", 
+                    annotation_text=t("cu_fluct_baseline_annotation")
+                )
                 st.plotly_chart(fig_norm_fluct, width="stretch")
             else:
-                st.caption("Insufficient usage delta to calculate standard baseline.")
+                st.caption(t("cu_insufficient_delta"))
                 
         st.markdown("---")
     else:
-        st.info("Log entries for at least two different utilities to activate cross-utility normalization metrics.")
+        st.info(t("cu_no_utilities"))

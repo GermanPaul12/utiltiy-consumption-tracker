@@ -1,4 +1,5 @@
 # main.py
+import datetime
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -49,8 +50,44 @@ if "theme_preference" not in st.session_state:
 
 styles.inject_theme(st.session_state.theme_preference)
 
-# --- COOKIE-BASED SESSION RESTORATION ---
+# --- COOKIE-BASED SESSION RESTORATION (SAFE WRAPPERS) ---
 cookie_controller = CookieController()
+
+# Absolut absturzsichere Wrapper-Funktionen zur Umgehung des internen Bugs im Cookie-Paket
+def safe_set_cookie(name, value, expires=None):
+    try:
+        # Falls die interne Struktur des Pakets noch nicht initialisiert wurde (None ist),
+        # weisen wir ihr über Name-Mangling ein leeres Dictionary zu, um den TypeError zu verhindern.
+        if hasattr(cookie_controller, "_CookieController__cookies") and getattr(cookie_controller, "_CookieController__cookies") is None:
+            setattr(cookie_controller, "_CookieController__cookies", {})
+        cookie_controller.set(name, value, expires=expires)
+    except Exception:
+        pass
+
+def safe_get_cookie(name):
+    try:
+        return cookie_controller.get(name)
+    except Exception:
+        return None
+
+def safe_remove_cookie(name):
+    try:
+        # Sicherheitsprüfung auch beim Löschen
+        if hasattr(cookie_controller, "_CookieController__cookies") and getattr(cookie_controller, "_CookieController__cookies") is None:
+            setattr(cookie_controller, "_CookieController__cookies", {})
+        cookie_controller.remove(name)
+    except Exception:
+        pass
+
+
+# UX-UPGRADE: Zwingt Streamlit zu exakt einem Rerun beim Start,
+# damit der Cookie-Controller Zeit hat, die Browser-Cookies asynchron zu laden.
+if "cookies_retrieved" not in st.session_state:
+    st.session_state.cookies_retrieved = False
+
+if not st.session_state.cookies_retrieved:
+    st.session_state.cookies_retrieved = True
+    st.rerun()
 
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -58,18 +95,24 @@ if "user" not in st.session_state:
 # Auto-Login-Versuch ausführen, falls kein User in der Session ist
 if st.session_state.user is None:
     try:
-        saved_session = cookie_controller.get("supabase_session")
+        saved_session = safe_get_cookie("supabase_session")
         if saved_session and isinstance(saved_session, dict):
-            # Session in Supabase wiederherstellen
+            # Session in Supabase wiederherstellen (erneuert abgelaufene Tokens automatisch im Hintergrund)
             res = auth.supabase.auth.set_session(
                 saved_session["access_token"], 
                 saved_session["refresh_token"]
             )
-            if res.user:
+            if res.user and res.session:
                 st.session_state.user = {
                     "id": res.user.id,
                     "email": res.user.email
                 }
+                # AUTO-REFRESH: Schreibt die neuen, frischen Tokens für weitere 30 Tage ins Cookie
+                expires_date = datetime.datetime.now() + datetime.timedelta(days=30)
+                safe_set_cookie("supabase_session", {
+                    "access_token": res.session.access_token,
+                    "refresh_token": res.session.refresh_token
+                }, expires=expires_date)
     except Exception:
         pass # Ignoriere Fehler bei fehlenden/ungültigen Cookies
 
@@ -118,11 +161,14 @@ if st.session_state.user is None:
                                 "id": user_data["id"],
                                 "email": user_data["email"]
                             }
-                            # Session dauerhaft im Browser-Cookie sichern (Gültigkeit z.B. 30 Tage)
-                            cookie_controller.set("supabase_session", {
+                            expires_date = datetime.datetime.now() + datetime.timedelta(days=30)
+                            
+                            # Session dauerhaft im Browser-Cookie sichern (Gültigkeit: 30 Tage)
+                            safe_set_cookie("supabase_session", {
                                 "access_token": user_data["access_token"],
                                 "refresh_token": user_data["refresh_token"]
-                            })
+                            }, expires=expires_date)
+                            
                             st.rerun()
                         else:
                             st.error("Invalid email or password.")
@@ -249,7 +295,7 @@ with st.sidebar:
     # Logout-Button am Ende der Sidebar
     if st.button(t("logout_btn"), width="stretch", type="secondary"):
         try:
-            cookie_controller.remove("supabase_session")
+            safe_remove_cookie("supabase_session")
             auth.supabase.auth.sign_out()
         except Exception:
             pass

@@ -12,8 +12,20 @@ def calculate_monthly_allocated_consumption(processed_logs, rates):
         "Cold Water (m³)": {"rate_key": "cold_water_m3", "unit": "m³"}
     }
     
+    # Bestimme das jüngste Startdatum (Spätestes aus Einzug und Tarifstart)
+    move_in = rates.get("move_in_date")
+    tariff_start = rates.get("tariff_start_date")
+    effective_start_date = None
+    if move_in and tariff_start:
+        effective_start_date = max(pd.to_datetime(move_in).date(), pd.to_datetime(tariff_start).date())
+    
     today = datetime.date.today()
     start_period = today - datetime.timedelta(days=365)
+    
+    # Begrenze den historischen Proratisierungs-Zeitraum auf das Einzugs-/Tarifdatum
+    if effective_start_date is not None:
+        start_period = max(start_period, effective_start_date)
+        
     date_range = pd.date_range(start=start_period, end=today).date
     
     monthly_data = {}
@@ -24,6 +36,15 @@ def calculate_monthly_allocated_consumption(processed_logs, rates):
             continue
             
         meter_df = meter_df.sort_values(by='date')
+        
+        # Filtere auch hier die Einzel-Logs auf den aktiven Berechnungszeitraum
+        if effective_start_date is not None:
+            meter_df['date'] = pd.to_datetime(meter_df['date']).dt.date
+            meter_df = meter_df[meter_df['date'] >= effective_start_date].copy()
+            
+        if len(meter_df) < 2:
+            continue
+            
         df_days = pd.DataFrame({"date": date_range})
         df_days['rate'] = 0.0
         

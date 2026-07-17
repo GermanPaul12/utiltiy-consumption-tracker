@@ -95,30 +95,39 @@ def render_page(processed_logs, stats, rates, plotly_template, smart_logs=None):
             total_prepayments_to_date, global_projected_annual_standing, total_annual_prepayments
         )
         
-        # Standard-Tabs für die einzelnen Utility-Klassen
+        # ---------------------------------------------------------
+        # NEU: 3-SPALTEN-LAYOUT FÜR DIREKTEN VERGLEICH (STATT TABS)
+        # ---------------------------------------------------------
         st.markdown("---")
         st.subheader(t("dash_utility_breakdown_header"))
-        tab_elec, tab_hw, tab_cw = st.tabs([t("dash_tab_elec"), t("dash_tab_hw"), t("dash_tab_cw")])
         
-        for tab, m_name, suffix in zip([tab_elec, tab_hw, tab_cw], ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"], ["kWh", "MWh", "m³"]):
-            with tab:
+        col_elec, col_hw, col_cw = st.columns(3)
+        cols = [col_elec, col_hw, col_cw]
+        meters = ["Electricity (kWh)", "Hot Water (MWh)", "Cold Water (m³)"]
+        suffixes = ["kWh", "MWh", "m³"]
+        headers = [t("dash_tab_elec"), t("dash_tab_hw"), t("dash_tab_cw")]
+        
+        for col, m_name, suffix, header in zip(cols, meters, suffixes, headers):
+            with col:
+                st.markdown(f"#### {header}")
                 if m_name in stats and stats[m_name]["entries_count"] > 1:
                     s = stats[m_name]
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(t("dash_metric_total_consumption"), f"{s['total_consumption']:,.3f} {suffix}")
-                        st.metric(t("dash_metric_daily_avg_consumption"), f"{s['avg_daily_consumption']:.4f} {suffix}/day")
-                        st.metric(t("dash_metric_monthly_avg_consumption"), f"{s['avg_monthly_consumption']:.3f} {suffix}/month")
-                    with col2:
-                        st.metric(t("dash_metric_total_cost"), f"€{s['total_cost']:,.2f}")
-                        st.metric(t("dash_metric_daily_avg_cost"), f"€{s['avg_daily_cost']:.2f}/day")
-                        st.metric(t("dash_metric_monthly_avg_cost"), f"€{s['avg_monthly_cost']:.2f}/month")
-                    with col3:
-                        st.metric(t("dash_metric_monthly_prepayment"), f"€{s['monthly_prepayment']:.2f}/month")
-                        if s['projected_annual_standing'] >= 0:
-                            st.metric(t("dash_metric_projected_refund"), f"€{s['projected_annual_standing']:.2f}")
-                        else:
-                            st.metric(t("dash_metric_projected_backpayment"), f"-€{abs(s['projected_annual_standing']):.2f}", delta_color="inverse")
+                    
+                    st.metric(t("dash_metric_total_consumption"), f"{s['total_consumption']:,.3f} {suffix}")
+                    st.metric(t("dash_metric_daily_avg_consumption"), f"{s['avg_daily_consumption']:.4f} {suffix}/day")
+                    st.metric(t("dash_metric_monthly_avg_consumption"), f"{s['avg_monthly_consumption']:.3f} {suffix}/month")
+                    
+                    st.markdown("---")
+                    st.metric(t("dash_metric_total_cost"), f"€{s['total_cost']:,.2f}")
+                    st.metric(t("dash_metric_daily_avg_cost"), f"€{s['avg_daily_cost']:.2f}/day")
+                    st.metric(t("dash_metric_monthly_avg_cost"), f"€{s['avg_monthly_cost']:.2f}/month")
+                    
+                    st.markdown("---")
+                    st.metric(t("dash_metric_monthly_prepayment"), f"€{s['monthly_prepayment']:.2f}/month")
+                    if s['projected_annual_standing'] >= 0:
+                        st.metric(t("dash_metric_projected_refund"), f"€{s['projected_annual_standing']:.2f}")
+                    else:
+                        st.metric(t("dash_metric_projected_backpayment"), f"-€{abs(s['projected_annual_standing']):.2f}", delta_color="inverse")
                 else:
                     st.info(t("dash_insufficient_data"))
 

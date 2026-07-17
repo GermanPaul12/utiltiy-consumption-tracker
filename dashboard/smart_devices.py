@@ -3,11 +3,12 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from utils import database as db
+from utils.i18n import t  # Importiert das Übersetzungsmodul
 from .calculations import get_daily_prorated_electricity
 
 def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map, plotly_template):
-    st.subheader("🔌 Smart Device Log Analysis")
-    st.write("Detailed historical breakdown of individual smart plugs compared directly to your main meter.")
+    st.subheader(t("sm_header"))
+    st.write(t("sm_subtitle"))
     
     # 1. Standardize and deduplicate smart logs
     smart_logs['date'] = pd.to_datetime(smart_logs['date']).dt.date
@@ -17,7 +18,7 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
     latest_date = df_smart_clean['date'].max()
     df_latest_smart = df_smart_clean[df_smart_clean['date'] == latest_date].copy()
     
-    st.info(f"Showing measurements from date: **{latest_date}**")
+    st.info(t("sm_showing_date").format(date=latest_date))
     
     # A. Line Chart: Smart Device Daily Energy Consumption Over Time
     fig_smart_time = px.line(
@@ -26,8 +27,12 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
         y="today_energy_kwh",
         color="device_name",
         markers=True,
-        title="Daily Smart Plug Energy Consumption Over Time (kWh)",
-        labels={"today_energy_kwh": "Energy Consumed Today (kWh)", "date": "Date", "device_name": "Device Group"},
+        title=t("sm_title_time"),
+        labels={
+            "today_energy_kwh": t("sm_label_energy"), 
+            "date": t("sm_label_date"), 
+            "device_name": t("sm_label_group")
+        },
         template=plotly_template
     )
     st.plotly_chart(fig_smart_time, width="stretch")
@@ -55,12 +60,12 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
                 value_name="Daily Energy (kWh)"
             )
             
-            st.markdown("#### ⚖️ Smart Devices vs. Total Electricity Consumption")
+            st.markdown(f"#### {t('sm_compare_header')}")
             
             # Scaling toggle selector
             scale_mode = st.radio(
-                "Choose Y-Axis Scale Transformation:",
-                ["Linear Scale (Normal)", "Logarithmic Scale (Log10 - Best for highlighting smaller device trends)"],
+                t("sm_scale_label"),
+                [t("sm_scale_linear"), t("sm_scale_log")],
                 horizontal=True
             )
             
@@ -69,27 +74,49 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
                 x="date",
                 y="Daily Energy (kWh)",
                 color="Category",
-                title="Daily Electricity Allocation Breakdown Over Time",
-                labels={"Daily Energy (kWh)": "Consumption (kWh / Day)", "date": "Date"},
+                title=t("sm_title_allocation"),
+                labels={
+                    "Daily Energy (kWh)": t("sm_label_consumption"), 
+                    "date": t("sm_label_date"),
+                    "Category": t("sm_label_group")
+                },
                 template=plotly_template,
                 color_discrete_map=color_map
             )
             
-            if "Logarithmic" in scale_mode:
+            if t("sm_scale_log") in scale_mode:
                 fig_compare_stacked.update_yaxes(type="log")
                 
             st.plotly_chart(fig_compare_stacked, width="stretch")
 
-            # Daily Electricity Cost Share Breakdown (considering daily average costs)
-            st.markdown("#### 💶 Daily Electricity Cost Distribution (€ / Day)")
-            st.write("Calculated using your actual electricity price per kWh and base price:")
+            # ---------------------------------------------------------
+            # MATHEMATISCHES NEU-DESIGN: ALLZEIT-MITTELWERTE SEIT EINZUG
+            # ---------------------------------------------------------
+            st.markdown(f"#### {t('sm_cost_header')}")
+            st.write(t("sm_cost_desc"))
             
-            # Use latest metrics day for allocation, apply rate
+            # 1. Ermittle effektiven Startpunkt (jüngstes Datum aus Einzug & Tarifstart)
+            move_in = rates.get("move_in_date")
+            tariff_start = rates.get("tariff_start_date")
+            effective_start_date = None
+            if move_in and tariff_start:
+                effective_start_date = max(pd.to_datetime(move_in).date(), pd.to_datetime(tariff_start).date())
+            
+            # 2. Filtere Smart-Logs auf den aktiven Zeitraum
+            if effective_start_date is not None:
+                df_smart_active_period = df_smart_clean[df_smart_clean['date'] >= effective_start_date]
+            else:
+                df_smart_active_period = df_smart_clean
+                
+            # 3. Berechne den historischen Durchschnitt pro Tag für jedes Gerät
+            df_device_averages = df_smart_active_period.groupby("device_name")["today_energy_kwh"].mean().reset_index()
+            
+            # Kosten-Allokation berechnen anhand des Allzeit-Durchschnitts
             cost_allocation = []
             elec_rate = rates["electricity_kwh"]
-            
             total_allocated_smart_cost = 0.0
-            for _, dev_row in df_latest_smart.iterrows():
+            
+            for _, dev_row in df_device_averages.iterrows():
                 dev_cost = dev_row["today_energy_kwh"] * elec_rate
                 total_allocated_smart_cost += dev_cost
                 cost_allocation.append({
@@ -97,7 +124,7 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
                     "Daily Cost (€/day)": dev_cost
                 })
             
-            # Total daily cost from manual zähler (using dynamic average)
+            # Gesamter täglicher Zähler-Durchschnitt aus stats holen
             total_avg_daily_cost = stats.get("Electricity (kWh)", {}).get("avg_daily_cost", 0.0)
             unbekannt_cost = max(0.0, total_avg_daily_cost - total_allocated_smart_cost)
             
@@ -112,7 +139,7 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
                 df_cost_alloc,
                 values="Daily Cost (€/day)",
                 names="Group",
-                title=f"Electricity Cost Allocation (Total average: €{total_avg_daily_cost:.2f} / day)",
+                title=t("sm_cost_title").format(val=total_avg_daily_cost),
                 template=plotly_template,
                 color="Group",
                 color_discrete_map=color_map,
@@ -121,25 +148,25 @@ def render(current_user_id, processed_logs, smart_logs, stats, rates, color_map,
             st.plotly_chart(fig_cost_alloc_pie, width="stretch")
             
         else:
-            st.warning("No overlapping dates found between manual meter logs and smart device logs to calculate the remainder analysis.")
+            st.warning(t("sm_no_overlap_warning"))
     else:
-        st.info("Log at least two manual electricity readings to enable the smart device comparison model.")
+        st.info(t("sm_no_manual_logs"))
 
     # Summary Row Table
-    st.markdown("#### Smart Plugs: Activity & Usage Table")
+    st.markdown(f"#### {t('sm_table_header')}")
     st.dataframe(
         df_latest_smart[[
             "device_name", "ip", "current_power_w", 
             "today_energy_kwh", "month_energy_kwh", 
             "today_runtime_min", "month_runtime_min"
         ]].rename(columns={
-            "device_name": "Device Name",
-            "ip": "IP Address",
-            "current_power_w": "Power (W)",
-            "today_energy_kwh": "Today (kWh)",
-            "month_energy_kwh": "Month (kWh)",
-            "today_runtime_min": "Runtime Today (Min)",
-            "month_runtime_min": "Runtime Month (Min)"
+            "device_name": t("sm_col_name"),
+            "ip": t("sm_col_ip"),
+            "current_power_w": t("sm_col_power"),
+            "today_energy_kwh": t("sm_col_today"),
+            "month_energy_kwh": t("sm_col_month"),
+            "today_runtime_min": t("sm_col_rt_today"),
+            "month_runtime_min": t("sm_col_rt_month")
         }),
         width="stretch"
     )
